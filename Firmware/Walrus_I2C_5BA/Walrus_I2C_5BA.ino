@@ -77,7 +77,7 @@
 // #define COEF14 37
 // #define COEF15 1
 
-#define CTRL 0x00  //Define location of onboard control/confiuration register
+#define CTRL 0x26  //Define location of onboard control/confiuration register (Schema 1 Page 1 Config byte; was 0x00, which is now the Page 0 schema byte)
 
 const uint8_t PresADR = 0x77;
 // const uint8_t TempADR = 0x18; 
