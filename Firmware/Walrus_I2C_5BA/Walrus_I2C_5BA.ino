@@ -156,7 +156,7 @@ volatile uint8_t ADR = 0x57; // Schema 1: 'W' (ASCII mnemonic); former 0x4D clas
 
 uint8_t Config = 0; //Global config value
 
-uint8_t Reg[64] = {0}; //Initialize registers; 0x00–0x1F = Page 0 (identity), 0x20–0x3F = Page 1 (sensor data)
+uint8_t Reg[64] = {0}; //Initialize registers; 0x00–0x1F = Page 0 (identity), 0x20–0x27 = Page 1 Block 0 (status/control), 0x28–0x3F = Page 1 sensor data
 bool StartSample = true; //Flag used to start a new converstion, make a conversion on startup
 // const unsigned int UpdateRate = 5; //Rate of update
 const unsigned int UpdateRate[] = {5, 10, 60, 300}; //FIX with better numbers! 
@@ -248,9 +248,9 @@ void loop() {
     SplitAndLoad(0x12, uint16_t(GROUPID));
     SplitAndLoad(0x14, uint16_t(INDID));
     SplitAndLoad(0x16, uint16_t(FIRMWAREID));
-    SplitAndLoad(0x22, long(Pressure*1000.0));              //Schema 1: pressure, int32, µBar
-    SplitAndLoad(0x26, (unsigned int)(int16_t)_temperature_actual); //Schema 1: temp MS5803, int16, 0.01°C
-    SplitAndLoad(0x28, (unsigned int)(int16_t)(Temp0*100.0));       //Schema 1: temp ext, int16, 0.01°C
+    SplitAndLoad(0x28, long(Pressure*1000.0));              //Schema 1: pressure, int32, µBar (Block 1)
+    SplitAndLoad(0x2C, (unsigned int)(int16_t)_temperature_actual); //Schema 1: temp MS5803, int16, 0.01°C (Block 1)
+    SplitAndLoad(0x30, (unsigned int)(int16_t)(Temp0*100.0));       //Schema 1: temp ext, int16, 0.01°C (Block 2)
 
     Reg[0x20] |= 0x01; //Set ready flag (Page 1 status byte, bit 0)
     // digitalWrite(9, LOW); //DEBUG!
