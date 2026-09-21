@@ -254,19 +254,26 @@ Block 3 (0x18–0x1F)   Integrity + administration
 
 **Page 1 (0x20–0x3F) — Sensor data (SRAM)**
 
+Chip table:
+
+| Index | Chip | Measurements |
+|-------|------|--------------|
+| 0 | MS5803 | pressure, temperature |
+| 1 | MCP9808 | external (water) temperature |
+
+Block 0 (0x20–0x27) is the universal block defined by [NW-Device-Specification](https://github.com/NorthernWidget/NW-Device-Specification#page-1--sensor-data): status (ready, per-chip fault bits, pan-fault), control (trigger, chip select, sleep), reading counter, device config byte at 0x26, latched fault code at 0x27. Device data begins at 0x28. Config (0x26): bits 1:0 = free-running update period, 0 = 5 s, 1 = 10 s, 2 = 60 s, 3 = 300 s; bits 7:2 reserved.
+
 ```
-Block 0 (0x20–0x27)   MS5803 — pressure + temperature
-  0x20        Status       bit 0=ready, bit 1=MS5803 fault, bit 2=ext temp fault,
-                           bit 7=pan-fault
-  0x21        Extended faults (reserved, 0x00)
-  0x22–0x25   Pressure     int32, µBar, little-endian
-  0x26–0x27   Temp MS5803  int16, 0.01 °C, little-endian
+Block 1 (0x28–0x2F)   MS5803 — pressure + temperature
+  0x28–0x2B   Pressure     int32, µBar, little-endian
+  0x2C–0x2D   Temp MS5803  int16, 0.01 °C, little-endian
+  0x2E–0x2F   Reserved
 
-Block 1 (0x28–0x2F)   External temperature sensor (MCP9808)
-  0x28–0x29   Temp ext     int16, 0.01 °C, little-endian
-  0x2A–0x2F   Reserved
+Block 2 (0x30–0x37)   External temperature sensor (MCP9808)
+  0x30–0x31   Temp ext     int16, 0.01 °C, little-endian
+  0x32–0x37   Reserved
 
-Block 2–3 (0x30–0x3F)   Reserved
+Block 3 (0x38–0x3F)   Reserved
 ```
 
 ## Housing
