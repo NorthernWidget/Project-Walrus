@@ -96,7 +96,7 @@
 #define REG_CTRL     0x21
 #define REG_COUNTER  0x22
 #define REG_REQUEST  0x24  //Readings requested, uint16 LE, writable; Walrus has no chip power to hold, so it only accepts the write
-#define REG_FAULT    0x27
+#define REG_REPORT   0x27
 #define BIT_READY    0x01
 #define BIT_PANFAULT 0x80
 #define BIT_TRIGGER  0x01
@@ -105,8 +105,8 @@
 #define BIT_SLEEP    0x80
 #define FAULT_MS5803_NOACK  0x01  //chip 0, kind 1
 #define FAULT_MCP9808_NOACK 0x21  //chip 1, kind 1
-#define FAULT_UNIT_RESET    0xE6  //unit (7), kind 6: reset since the controller last wrote Control
-#define FAULT_UNIT_PAGE0    0xE3  //unit (7), kind 3: Page 0 CRC did not match (unprovisioned or corrupt)
+#define NOTICE_UNIT_RESET    0xE6  //unit (7), kind 6: reset since the controller last wrote Control (a notice: no status bit)
+#define NOTICE_UNIT_PAGE0    0xE3  //unit (7), kind 3: Page 0 CRC did not match (unprovisioned or corrupt)
 
 const uint8_t PresADR = 0x77;
 // const uint8_t TempADR = 0x18; 
@@ -251,7 +251,7 @@ void setup() {
 
   loadPage0();
   if(Reg[REG_I2C_ADDR] != 0xFF) ADR = Reg[REG_I2C_ADDR]; //Provisioned address; 0xFF = use default
-  Reg[REG_FAULT] = page0Valid ? FAULT_UNIT_RESET : FAULT_UNIT_PAGE0; //Latched until the controller writes Control
+  Reg[REG_REPORT] = page0Valid ? NOTICE_UNIT_RESET : NOTICE_UNIT_PAGE0; //Latched until the controller writes Control
   Wire.begin(ADR);  //Begin slave I2C
 	Wire.onRequest(requestEvent);     // register event
   Wire.onReceive(receiveEvent);
@@ -326,8 +326,8 @@ void loop() {
     //the counter, set ready. Atomic so a controller's page read never
     //straddles the update or sees a reading half written.
     uint8_t status = BIT_READY;
-    if(doMS5803 && ms5803Fail) { status |= CHIP_MS5803; Reg[REG_FAULT] = FAULT_MS5803_NOACK; }
-    if(doMCP9808 && mcp9808Fail) { status |= CHIP_MCP9808; Reg[REG_FAULT] = FAULT_MCP9808_NOACK; }
+    if(doMS5803 && ms5803Fail) { status |= CHIP_MS5803; Reg[REG_REPORT] = FAULT_MS5803_NOACK; }
+    if(doMCP9808 && mcp9808Fail) { status |= CHIP_MCP9808; Reg[REG_REPORT] = FAULT_MCP9808_NOACK; }
     if(status & 0x7E) status |= BIT_PANFAULT;
     uint16_t count = Reg[REG_COUNTER] | (Reg[REG_COUNTER + 1] << 8);
     count++;
@@ -545,7 +545,7 @@ void receiveEvent(int DataLen)
       uint8_t Val = Wire.read();
       if(!isWritable(Pos)) return; //Read-only register: ignore the write
       Reg[Pos] = Val; //Set register value
-      if(Pos == REG_CTRL) Reg[REG_FAULT] = 0; //A control write acknowledges the latched fault
+      if(Pos == REG_CTRL) Reg[REG_REPORT] = 0; //A control write acknowledges the report
       if(Pos == REG_I2C_ADDR) EEPROM.update(PAGE0_BASE + REG_I2C_ADDR, Val); //Persist I2C address (compare-before-write); takes effect on next boot
   }
 
