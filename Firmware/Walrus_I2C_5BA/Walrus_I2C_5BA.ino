@@ -79,6 +79,18 @@
 
 #define CTRL 0x26  //Define location of onboard control/confiuration register (Schema 1 Page 1 Config byte; was 0x00, which is now the Page 0 schema byte)
 
+//Firmware patch version: bump on any behavioural change visible to the
+//library. The hardware version lives in Page 0 (EEPROM), written at
+//provisioning; the firmware writes this constant into the served copy of
+//Page 0 at 0x0A and recomputes the CRC there (NW-Device-Specification).
+#define FW_FW_PATCH 1
+
+//Page 0 (identity, 32 bytes) is the top of EEPROM: 0xE0-0xFF on the
+//ATtiny1634's 256-byte EEPROM. Written once by NW-Provision; read at boot.
+#define PAGE0_BASE   (E2END + 1 - 32)
+#define REG_I2C_ADDR 0x1F
+#define ADR_DEFAULT  0x57  //Schema 1 'W'; used when Page 0 byte 0x1F is 0xFF
+
 const uint8_t PresADR = 0x77;
 // const uint8_t TempADR = 0x18; 
 const uint8_t TempADR = 0x18; 
@@ -120,10 +132,6 @@ const uint8_t TempADR = 0x18;
 // #define INDID 0x0000 //Dummy
 // #define FIRMWAREID 0x0001 //Base firmware ID
 
-const unsigned int MODEL = 0x5702; //DEBUG!
-const unsigned int GROUPID = 0x1701; //Default for lab
-const unsigned int INDID = 0x0000; //Dummy
-const unsigned int FIRMWAREID = 0x0001; //Base firmware ID
 
 uint16_t coefficient[8];// Coefficients;
 
@@ -152,11 +160,32 @@ uint8_t StatusReg = 0; //Register to be used to display the status of the sub mo
 
 const uint8_t ModeSelPin = 2; //Pin to select between I2C and RS-485
 
-volatile uint8_t ADR = 0x57; // Schema 1: 'W' (ASCII mnemonic); former 0x4D clashed with Margay
+volatile uint8_t ADR = ADR_DEFAULT; //I2C address: Page 0 byte 0x1F (EEPROM), or ADR_DEFAULT if unprogrammed. Schema 1: 'W' (ASCII mnemonic); former 0x4D clashed with Margay
 
 uint8_t Config = 0; //Global config value
 
 uint8_t Reg[64] = {0}; //Initialize registers; 0x00–0x1F = Page 0 (identity), 0x20–0x27 = Page 1 Block 0 (status/control), 0x28–0x3F = Page 1 sensor data
+bool page0Valid = false; //Page 0 CRC matched what NW-Provision wrote
+
+//CRC-8/SMBUS (poly 0x07, init 0x00), the NW-Device-Specification reference.
+uint8_t crc8(const uint8_t* data, uint8_t len) {
+  uint8_t crc = 0x00;
+  for(uint8_t i = 0; i < len; i++) {
+    crc ^= data[i];
+    for(uint8_t b = 0; b < 8; b++) crc = (crc & 0x80) ? (crc << 1) ^ 0x07 : (crc << 1);
+  }
+  return crc;
+}
+
+//Copy Page 0 from EEPROM into the served register array, check its CRC,
+//then substitute this firmware's patch version at 0x0A and recompute the
+//CRC of the served copy (EEPROM is left as provisioned).
+void loadPage0() {
+  for(uint8_t i = 0; i < 32; i++) Reg[i] = EEPROM.read(PAGE0_BASE + i);
+  page0Valid = (crc8(Reg, 0x1E) == Reg[0x1E]) && Reg[0x00] == 0x01;
+  Reg[0x0A] = FW_FW_PATCH;
+  Reg[0x1E] = crc8(Reg, 0x1E);
+}
 bool StartSample = true; //Flag used to start a new converstion, make a conversion on startup
 // const unsigned int UpdateRate = 5; //Rate of update
 const unsigned int UpdateRate[] = {5, 10, 60, 300}; //FIX with better numbers! 
@@ -189,6 +218,8 @@ void setup() {
   // digitalWrite(9, LOW); //DEBUG!
   // if(!digitalRead(ADR_SEL_PIN)) ADR = ADR_Alt; //If solder jumper is bridged, use alternate address //DEBUG!
 
+  loadPage0();
+  if(Reg[REG_I2C_ADDR] != 0xFF) ADR = Reg[REG_I2C_ADDR]; //Provisioned address; 0xFF = use default
   Wire.begin(ADR);  //Begin slave I2C
 	Wire.onRequest(requestEvent);     // register event
   Wire.onReceive(receiveEvent);
@@ -241,13 +272,6 @@ void loop() {
     Reg[0x20] &= ~0x01; //Clear ready flag (Page 1 status byte, bit 0) while new values are being written
     //LOAD VALUES
     getValues(); //Update valus before loading  //DEBUG!
-    SplitAndLoad(0x02, long(Pressure*1000.0)); //MicroBars pressure (pre-Schema-1 address)
-    SplitAndLoad(0x06, long(Temp0*10000.0)); //1/10000 Degree C (pre-Schema-1 address)
-    SplitAndLoad(0x0A, long(Temp1*10000.0)); //1/10000 Degree C (pre-Schema-1 address)
-    SplitAndLoad(0x0E, uint16_t(MODEL));
-    SplitAndLoad(0x12, uint16_t(GROUPID));
-    SplitAndLoad(0x14, uint16_t(INDID));
-    SplitAndLoad(0x16, uint16_t(FIRMWAREID));
     SplitAndLoad(0x28, long(Pressure*1000.0));              //Schema 1: pressure, int32, µBar (Block 1)
     SplitAndLoad(0x2C, (unsigned int)(int16_t)_temperature_actual); //Schema 1: temp MS5803, int16, 0.01°C (Block 1)
     SplitAndLoad(0x30, (unsigned int)(int16_t)(Temp0*100.0));       //Schema 1: temp ext, int16, 0.01°C (Block 2)
