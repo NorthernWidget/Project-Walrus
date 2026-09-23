@@ -529,7 +529,7 @@ Implements [NW-Device-Specification](https://github.com/NorthernWidget/NW-Device
 Block 0:  Schema=0x01, Name='W','a','l','r','u','s',0x00
 Block 1:  HW major=[mfr], HW minor=[mfr], FW patch=[mfr], 0x00,0x00,0x00, Reserved
 Block 2:  Board type=0x5702 ('W'=0x57, rev 2), Group ID=[mfr], Unique ID=[mfr], FirmwareID=0x0000
-Block 3:  Reserved, Magic=0x00, CRC=[computed], I2C address=0x57
+Block 3:  Reserved, Magic=0x4E, CRC=[computed], I2C address=0x57
 ```
 
 Legacy deployed units use I²C address `0x4D` (pre-Schema-1).
