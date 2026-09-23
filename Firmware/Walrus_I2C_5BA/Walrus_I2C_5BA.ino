@@ -160,6 +160,8 @@ float Temp0 = 0; // Global tempurature from thermistor
 float Temp1 = 0; // Global tempurature MS5803
 // #define ADR_ALT 0x41 //Alternative device address
 
+bool ms5803Fail = false; //MS5803 did not acknowledge during the last reading
+bool mcp9808Fail = false; //MCP9808 did not acknowledge during the last reading
 uint8_t StatusReg = 0; //Register to be used to display the status of the sub modules , Bits 0~1 used for status of ADC, bits 2~3 used for MS5803 status
 
 // //Global values for gain and int time of visable light sensor
@@ -233,6 +235,8 @@ void setup() {
   // Serial.begin(115200); //DEBUG!
   // Serial.println("begin"); //DEBUG!
   Reg[CTRL] = 0x00; //Set Config to POR value
+  Reg[REG_STATUS] = 0; //Not ready: no reading yet
+  Reg[REG_CTRL] = CHIP_MS5803 | CHIP_MCP9808; //Power-up: every chip selected
   //SETUP HARDWARE!
   //SET CONTROL FOR I2C vs RS-485!!!!!!!!!!!!
   // pinMode(ADR_SEL_PIN, INPUT_PULLUP);
@@ -244,6 +248,7 @@ void setup() {
 
   loadPage0();
   if(Reg[REG_I2C_ADDR] != 0xFF) ADR = Reg[REG_I2C_ADDR]; //Provisioned address; 0xFF = use default
+  Reg[REG_FAULT] = page0Valid ? FAULT_UNIT_RESET : FAULT_UNIT_PAGE0; //Latched until the controller writes Control
   Wire.begin(ADR);  //Begin slave I2C
 	Wire.onRequest(requestEvent);     // register event
   Wire.onReceive(receiveEvent);
@@ -284,6 +289,7 @@ void loop() {
   static unsigned long Timeout = millis() % (UpdateRate[3]*1000); //Take mod with longest update rate 
 
   // digitalWrite(10, HIGH); //DEBUG!
+  if(Reg[REG_CTRL] & BIT_TRIGGER) StartSample = true; //Controller trigger, in addition to the free-running timer
   if(StartSample == true) {
 
     // Config = Reg[CTRL]; //Update local register val
@@ -293,14 +299,38 @@ void loop() {
     //  delay(800); //Wait for new sample
     // }
     // digitalWrite(9, HIGH); //DEBUG!
-    Reg[0x20] &= ~0x01; //Clear ready flag (Page 1 status byte, bit 0) while new values are being written
+    //A reading begins: clear ready, take the chip selection, consume the trigger.
+    Reg[REG_STATUS] &= ~BIT_READY; //Clear ready flag (Page 1 status byte, bit 0) while new values are being written
+    bool doMS5803 = Reg[REG_CTRL] & CHIP_MS5803;
+    bool doMCP9808 = Reg[REG_CTRL] & CHIP_MCP9808;
+    Reg[REG_CTRL] &= ~(BIT_TRIGGER | BIT_SLEEP); //trigger consumed; sleep not implemented
+    ms5803Fail = false;
+    mcp9808Fail = false;
     //LOAD VALUES
-    getValues(); //Update valus before loading  //DEBUG!
-    SplitAndLoad(0x28, long(Pressure*1000.0));              //Schema 1: pressure, int32, µBar (Block 1)
-    SplitAndLoad(0x2C, (unsigned int)(int16_t)_temperature_actual); //Schema 1: temp MS5803, int16, 0.01°C (Block 1)
-    SplitAndLoad(0x30, (unsigned int)(int16_t)(Temp0*100.0));       //Schema 1: temp ext, int16, 0.01°C (Block 2)
+    if(doMS5803) {
+      getMeasurements();
+      Pressure = _pressure_actual / (float(COEF4)/100.0);
+      Temp1 = _temperature_actual / 100.0;
+      SplitAndLoad(0x28, long(Pressure*1000.0));              //Schema 1: pressure, int32, µBar (Block 1)
+      SplitAndLoad(0x2C, (unsigned int)(int16_t)_temperature_actual); //Schema 1: temp MS5803, int16, 0.01°C (Block 1)
+    }
+    if(doMCP9808) {
+      Temp0 = getTemp(); //DEBUG!
+      SplitAndLoad(0x30, (unsigned int)(int16_t)(Temp0*100.0));       //Schema 1: temp ext, int16, 0.01°C (Block 2)
+    }
 
-    Reg[0x20] |= 0x01; //Set ready flag (Page 1 status byte, bit 0)
+    //Reading complete: load status and fault, bump the counter, set ready.
+    //Atomic so a controller's page read never straddles the update.
+    uint8_t status = BIT_READY;
+    if(doMS5803 && ms5803Fail) { status |= CHIP_MS5803; Reg[REG_FAULT] = FAULT_MS5803_NOACK; }
+    if(doMCP9808 && mcp9808Fail) { status |= CHIP_MCP9808; Reg[REG_FAULT] = FAULT_MCP9808_NOACK; }
+    if(status & 0x7E) status |= BIT_PANFAULT;
+    uint16_t count = Reg[REG_COUNTER] | (Reg[REG_COUNTER + 1] << 8);
+    count++;
+    cli();
+    Reg[REG_COUNTER] = count & 0xFF; Reg[REG_COUNTER + 1] = count >> 8;
+    Reg[REG_STATUS] = status; //Set ready flag (Page 1 status byte, bit 0)
+    sei();
     // digitalWrite(9, LOW); //DEBUG!
     StartSample = false; //Clear flag when new values updated  
   }
@@ -666,8 +696,9 @@ uint8_t sendCommand(uint8_t Command)
 {
 	si.beginTransmission(PresADR);
     si.write(Command);
-    si.endTransmission();
-    return 0; //DEBUG!
+    uint8_t Error = si.endTransmission();
+    if(Error) ms5803Fail = true; //No acknowledge: chip 0 fault on this reading
+    return Error;
    // si.beginTransmission(PresADR);
    // si.write(Command);
    // return si.endTransmission();
@@ -690,7 +721,7 @@ float getTemp()
 
   si.beginTransmission(TempADR);
   si.write(0x05);
-  si.endTransmission();
+  if(si.endTransmission()) mcp9808Fail = true; //No acknowledge: chip 1 fault on this reading
 
   si.requestFrom(TempADR, 2);
   ByteHigh = si.read();
