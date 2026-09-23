@@ -184,6 +184,9 @@ volatile uint8_t ADR = ADR_DEFAULT; //I2C address: Page 0 byte 0x1F (EEPROM), or
 uint8_t Config = 0; //Global config value
 
 uint8_t Reg[64] = {0}; //Initialize registers; 0x00–0x1F = Page 0 (identity), 0x20–0x27 = Page 1 Block 0 (status/control), 0x28–0x3F = Page 1 sensor data
+#define DATA_BASE 0x28 //First sensor data register (Page 1 Block 1)
+#define DATA_LEN  10   //0x28–0x31: the bytes a reading writes
+uint8_t Staged[DATA_LEN] = {0}; //A reading is assembled here and copied into Reg with the counter, so a page read never sees half a reading (spec: atomic rewrite)
 bool page0Valid = false; //Page 0 CRC matched what NW-Provision wrote
 
 //CRC-8/SMBUS (poly 0x07, init 0x00), the NW-Device-Specification reference.
@@ -319,8 +322,9 @@ void loop() {
       SplitAndLoad(0x30, (unsigned int)(int16_t)(Temp0*100.0));       //Schema 1: temp ext, int16, 0.01°C (Block 2)
     }
 
-    //Reading complete: load status and fault, bump the counter, set ready.
-    //Atomic so a controller's page read never straddles the update.
+    //Reading complete: copy the staged data in, load status and fault, bump
+    //the counter, set ready. Atomic so a controller's page read never
+    //straddles the update or sees a reading half written.
     uint8_t status = BIT_READY;
     if(doMS5803 && ms5803Fail) { status |= CHIP_MS5803; Reg[REG_FAULT] = FAULT_MS5803_NOACK; }
     if(doMCP9808 && mcp9808Fail) { status |= CHIP_MCP9808; Reg[REG_FAULT] = FAULT_MCP9808_NOACK; }
@@ -328,6 +332,7 @@ void loop() {
     uint16_t count = Reg[REG_COUNTER] | (Reg[REG_COUNTER + 1] << 8);
     count++;
     cli();
+    memcpy(Reg + DATA_BASE, Staged, DATA_LEN); //The whole reading appears at once, with its counter
     Reg[REG_COUNTER] = count & 0xFF; Reg[REG_COUNTER + 1] = count >> 8;
     Reg[REG_STATUS] = status; //Set ready flag (Page 1 status byte, bit 0)
     sei();
@@ -497,19 +502,19 @@ int ReadWord_LE(uint8_t Adr, uint8_t Command)  //Send command value, returns ent
   // return ((ByteHigh << 8) | ByteLow); //DEBUG!
 }
 
-void SplitAndLoad(uint8_t Pos, unsigned int Val) //Write 16 bits
+void SplitAndLoad(uint8_t Pos, unsigned int Val) //Write 16 bits into the staged reading; Pos is the Page 1 register address
 {
   uint8_t Len = sizeof(Val);
   for(int i = Pos; i < Pos + Len; i++) {
-    Reg[i] = (Val >> (i - Pos)*8) & 0xFF; //Pullout the next byte
+    Staged[i - DATA_BASE] = (Val >> (i - Pos)*8) & 0xFF; //Pullout the next byte
   }
 }
 
-void SplitAndLoad(uint8_t Pos, long Val)  //Write 32 bits
+void SplitAndLoad(uint8_t Pos, long Val)  //Write 32 bits into the staged reading
 {
   uint8_t Len = sizeof(Val);
   for(int i = Pos; i < Pos + Len; i++) {
-    Reg[i] = (Val >> (i - Pos)*8) & 0xFF; //Pullout the next byte
+    Staged[i - DATA_BASE] = (Val >> (i - Pos)*8) & 0xFF; //Pullout the next byte
   }
 }
 
