@@ -184,7 +184,7 @@ volatile uint8_t ADR = ADR_DEFAULT; //I2C address: Page 0 byte 0x1F (EEPROM), or
 
 uint8_t Config = 0; //Global config value
 
-uint8_t Reg[96] = {0}; //Initialize registers; 0x00–0x1F = Page 0 (identity), 0x20–0x3F = Page 1 (calibration: none on Walrus, zeros), 0x40–0x47 = Page 2 Block 0 (status/control), 0x48–0x5F = Page 2 sensor data
+uint8_t Reg[96] = {0}; //Initialize registers; 0x00–0x1F = Page 0 (identity), 0x20–0x3F = Page 1 (calibration: none on Walrus; served from EEPROM as stored), 0x40–0x47 = Page 2 Block 0 (status/control), 0x48–0x5F = Page 2 sensor data
 #define DATA_BASE 0x48 //First sensor data register (Page 2 Block 1)
 #define DATA_LEN  10   //0x48–0x51: the bytes a reading writes
 uint8_t Staged[DATA_LEN] = {0}; //A reading is assembled here and copied into Reg with the counter, so a page read never sees half a reading (spec: atomic rewrite)
@@ -204,7 +204,7 @@ uint8_t crc8(const uint8_t* data, uint8_t len) {
 //then substitute this firmware's patch version at 0x0A and recompute the
 //CRC of the served copy (EEPROM is left as provisioned).
 void loadPage0() {
-  for(uint8_t i = 0; i < 32; i++) Reg[i] = EEPROM.read(PAGE0_BASE + i);
+  for(uint8_t i = 0; i < 64; i++) Reg[i] = EEPROM.read(PAGE0_BASE + i); //The stored half, Page 0 and Page 1, byte for byte
   page0Valid = (crc8(Reg, 0x1E) == Reg[0x1E]) && Reg[0x00] == 0x01;
   Reg[0x0A] = FW_FW_PATCH;
   Reg[0x1E] = crc8(Reg, 0x1E);
@@ -532,7 +532,8 @@ void requestEvent()
   //rest of the buffer is discarded at the stop condition. Reads past the end
   //of the array wrap, so a controller never receives bytes from outside it.
   for(uint8_t i = 0; i < 32; i++) {
-    Wire.write(Reg[(RegID + i) % sizeof(Reg)]);
+    uint16_t k = (uint16_t)RegID + i;
+    Wire.write(k < sizeof(Reg) ? Reg[k] : 0x00); //Past the last page: zeros, never a wrap onto Page 0
   }
 }
 
