@@ -222,9 +222,9 @@ The firmware on `master` implements [NW-Device-Specification](https://github.com
 
 ### Register map (NW-Device-Specification Schema 1)
 
-Two 32-byte pages. Identity lives entirely in Page 0 (EEPROM, written by [NW-Provision](https://github.com/NorthernWidget/NW-Provision); the firmware copies it to the register array at boot, checks the CRC, and substitutes its own patch version at `0x0A`). Sensor data in Page 1 (SRAM). No calibration page (MS5803 coefficients are read from its internal PROM at startup). A controller sets a start register with a one-byte write and then reads up to 32 bytes with auto-increment.
+Three 32-byte pages. Identity lives entirely in Page 0 (EEPROM, written by [NW-Provision](https://github.com/NorthernWidget/NW-Provision); the firmware copies it to the register array at boot, checks the CRC, and substitutes its own patch version at `0x0A`). Page 1 is the calibration page and reads as zeros: Walrus has no calibration data (MS5803 coefficients are read from its internal PROM at startup). Sensor data in Page 2 (SRAM). Pages renumbered 2026-09-23 (spec 4c3b18d): calibration is Page 1 at 0x20, data Page 2 at 0x40. A controller sets a start register with a one-byte write and then reads up to 32 bytes with auto-increment.
 
-**Page 0 (0x00–0x1F) — Identity (EEPROM)**
+**Page 0 (0x00–0x1F): Identity (EEPROM)**
 
 ```
 Block 0 (0x00–0x07)   Core identity
@@ -252,7 +252,7 @@ Block 3 (0x18–0x1F)   Integrity + administration
   0x1F        0x57              I2C address (writable over I2C; persisted to EEPROM; 0xFF = use default)
 ```
 
-**Page 1 (0x20–0x3F) — Sensor data (SRAM)**
+**Page 2 (0x40–0x5F): Sensor data (SRAM)**
 
 Chip table:
 
@@ -261,19 +261,19 @@ Chip table:
 | 0 | MS5803 | pressure, temperature |
 | 1 | MCP9808 | external (water) temperature |
 
-Block 0 (0x20–0x27) is the universal block defined by [NW-Device-Specification](https://github.com/NorthernWidget/NW-Device-Specification#page-1-sensor-data). On Walrus: a reading starts on a trigger (Control `0x21` bit 0) or on the free-running timer that Config `0x26` bits 1:0 select (0 = 5 s, 1 = 10 s, 2 = 60 s, 3 = 300 s); Control bit 1 selects the MS5803 and bit 2 the MCP9808; ready (Status `0x20` bit 0) clears while the chips are read and returns with the reading counter (`0x22–0x23`) incremented; a chip that does not acknowledge sets its status bit (bit 1 MS5803, bit 2 MCP9808, bit 7 summary) and latches kind 1 in the fault byte `0x27`, which the next Control write clears; boot latches unit kind 6 (reset), or kind 3 if Page 0 failed its CRC. The readings-requested word (`0x24–0x25`) is accepted but changes nothing: no chip on Walrus is powered per batch. Sleep (Control bit 7) is accepted and ignored. The main loop polls every 100 ms, so a trigger is answered within about 100 ms plus the MS5803 conversion time: status (ready, per-chip fault bits, pan-fault), control (trigger, chip select, sleep), reading counter, device config byte at 0x26, latched fault code at 0x27. Device data begins at 0x28. Config (0x26): bits 1:0 = free-running update period, 0 = 5 s, 1 = 10 s, 2 = 60 s, 3 = 300 s; bits 7:2 reserved.
+Block 0 (0x40–0x47) is the universal block defined by [NW-Device-Specification](https://github.com/NorthernWidget/NW-Device-Specification#page-2-sensor-data). On Walrus: a reading starts on a trigger (Control `0x41` bit 0) or on the free-running timer that Config `0x46` bits 1:0 select (0 = 5 s, 1 = 10 s, 2 = 60 s, 3 = 300 s); Control bit 1 selects the MS5803 and bit 2 the MCP9808; ready (Status `0x40` bit 0) clears while the chips are read and returns with the reading counter (`0x42–0x43`) incremented; a chip that does not acknowledge sets its status bit (bit 1 MS5803, bit 2 MCP9808, bit 7 summary) and latches kind 1 in the fault byte `0x47`, which the next Control write clears; boot latches unit kind 6 (reset), or kind 3 if Page 0 failed its CRC. The readings-requested word (`0x44–0x45`) is accepted but changes nothing: no chip on Walrus is powered per batch. Sleep (Control bit 7) is accepted and ignored. The main loop polls every 100 ms, so a trigger is answered within about 100 ms plus the MS5803 conversion time: status (ready, per-chip fault bits, pan-fault), control (trigger, chip select, sleep), reading counter, device config byte at 0x46, latched fault code at 0x47. Device data begins at 0x48. Config (0x46): bits 1:0 = free-running update period, 0 = 5 s, 1 = 10 s, 2 = 60 s, 3 = 300 s; bits 7:2 reserved.
 
 ```
-Block 1 (0x28–0x2F)   MS5803 — pressure + temperature
-  0x28–0x2B   Pressure     int32, µBar, little-endian
-  0x2C–0x2D   Temp MS5803  int16, 0.01 °C, little-endian
-  0x2E–0x2F   Reserved
+Block 1 (0x48–0x4F)   MS5803 — pressure + temperature
+  0x48–0x4B   Pressure     int32, µBar, little-endian
+  0x4C–0x4D   Temp MS5803  int16, 0.01 °C, little-endian
+  0x4E–0x4F   Reserved
 
-Block 2 (0x30–0x37)   External temperature sensor (MCP9808)
-  0x30–0x31   Temp ext     int16, 0.01 °C, little-endian
-  0x32–0x37   Reserved
+Block 2 (0x50–0x57)   External temperature sensor (MCP9808)
+  0x50–0x51   Temp ext     int16, 0.01 °C, little-endian
+  0x52–0x57   Reserved
 
-Block 3 (0x38–0x3F)   Reserved
+Block 3 (0x58–0x5F)   Reserved
 ```
 
 ## Housing
@@ -523,7 +523,7 @@ Once you are ready, you can deploy your sensor in the river, lake, or atmosphere
 
 ## NW-Device-Specification — Schema 1, Page 0
 
-Implements [NW-Device-Specification](https://github.com/NorthernWidget/NW-Device-Specification) Schema 1. The 32-byte identity block (Page 0) is stored at the top of EEPROM:
+Implements [NW-Device-Specification](https://github.com/NorthernWidget/NW-Device-Specification) Schema 1. The 32-byte identity block (Page 0) is the lower half of the 64-byte stored image at the top of EEPROM (Page 0 at `E2END + 1 - 64`, then the unused calibration Page 1 at `E2END + 1 - 32`):
 
 ```
 Block 0:  Schema=0x01, Name='W','a','l','r','u','s',0x00
