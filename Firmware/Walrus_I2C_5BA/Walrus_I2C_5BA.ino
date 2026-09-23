@@ -77,7 +77,7 @@
 // #define COEF14 37
 // #define COEF15 1
 
-#define CTRL 0x26  //Define location of onboard control/confiuration register (Schema 1 Page 1 Config byte; was 0x00, which is now the Page 0 schema byte)
+#define CTRL 0x46  //Define location of onboard control/confiuration register (Schema 1 Page 2 Config byte; was 0x00, which is now the Page 0 schema byte)
 
 //Firmware patch version: bump on any behavioural change visible to the
 //library. The hardware version lives in Page 0 (EEPROM), written at
@@ -85,18 +85,19 @@
 //Page 0 at 0x0A and recomputes the CRC there (NW-Device-Specification).
 #define FW_FW_PATCH 1
 
-//Page 0 (identity, 32 bytes) is the top of EEPROM: 0xE0-0xFF on the
-//ATtiny1634's 256-byte EEPROM. Written once by NW-Provision; read at boot.
-#define PAGE0_BASE   (E2END + 1 - 32)
+//The stored pages are the top 64 bytes of EEPROM (0xC0-0xFF on the
+//ATtiny1634): Page 0 (identity) at 0xC0-0xDF, written once by NW-Provision
+//and read at boot; Page 1 (calibration, none on Walrus) at 0xE0-0xFF, unused.
+#define PAGE0_BASE   (E2END + 1 - 64)
 #define REG_I2C_ADDR 0x1F
 #define ADR_DEFAULT  0x57  //Schema 1 'W'; used when Page 0 byte 0x1F is 0xFF
 
-//Page 1 Block 0 (NW-Device-Specification): universal status and control.
-#define REG_STATUS   0x20
-#define REG_CTRL     0x21
-#define REG_COUNTER  0x22
-#define REG_REQUEST  0x24  //Readings requested, uint16 LE, writable; Walrus has no chip power to hold, so it only accepts the write
-#define REG_REPORT   0x27
+//Page 2 Block 0 (NW-Device-Specification): universal status and control.
+#define REG_STATUS   0x40
+#define REG_CTRL     0x41
+#define REG_COUNTER  0x42
+#define REG_REQUEST  0x44  //Readings requested, uint16 LE, writable; Walrus has no chip power to hold, so it only accepts the write
+#define REG_REPORT   0x47
 #define BIT_READY    0x01
 #define BIT_PANFAULT 0x80
 #define BIT_TRIGGER  0x01
@@ -183,9 +184,9 @@ volatile uint8_t ADR = ADR_DEFAULT; //I2C address: Page 0 byte 0x1F (EEPROM), or
 
 uint8_t Config = 0; //Global config value
 
-uint8_t Reg[64] = {0}; //Initialize registers; 0x00–0x1F = Page 0 (identity), 0x20–0x27 = Page 1 Block 0 (status/control), 0x28–0x3F = Page 1 sensor data
-#define DATA_BASE 0x28 //First sensor data register (Page 1 Block 1)
-#define DATA_LEN  10   //0x28–0x31: the bytes a reading writes
+uint8_t Reg[96] = {0}; //Initialize registers; 0x00–0x1F = Page 0 (identity), 0x20–0x3F = Page 1 (calibration: none on Walrus, zeros), 0x40–0x47 = Page 2 Block 0 (status/control), 0x48–0x5F = Page 2 sensor data
+#define DATA_BASE 0x48 //First sensor data register (Page 2 Block 1)
+#define DATA_LEN  10   //0x48–0x51: the bytes a reading writes
 uint8_t Staged[DATA_LEN] = {0}; //A reading is assembled here and copied into Reg with the counter, so a page read never sees half a reading (spec: atomic rewrite)
 bool page0Valid = false; //Page 0 CRC matched what NW-Provision wrote
 
@@ -210,7 +211,7 @@ void loadPage0() {
 }
 
 //Registers a controller may write. Everything else is read-only and writes
-//to it are ignored (NW-Device-Specification, Page 1 rules).
+//to it are ignored (NW-Device-Specification, Page 2 rules).
 bool isWritable(uint8_t pos) {
   return pos == REG_CTRL || pos == CTRL || pos == REG_I2C_ADDR
       || pos == REG_REQUEST || pos == REG_REQUEST + 1;
@@ -303,7 +304,7 @@ void loop() {
     // }
     // digitalWrite(9, HIGH); //DEBUG!
     //A reading begins: clear ready, take the chip selection, consume the trigger.
-    Reg[REG_STATUS] &= ~BIT_READY; //Clear ready flag (Page 1 status byte, bit 0) while new values are being written
+    Reg[REG_STATUS] &= ~BIT_READY; //Clear ready flag (Page 2 status byte, bit 0) while new values are being written
     bool doMS5803 = Reg[REG_CTRL] & CHIP_MS5803;
     bool doMCP9808 = Reg[REG_CTRL] & CHIP_MCP9808;
     Reg[REG_CTRL] &= ~(BIT_TRIGGER | BIT_SLEEP); //trigger consumed; sleep not implemented
@@ -314,12 +315,12 @@ void loop() {
       getMeasurements();
       Pressure = _pressure_actual / (float(COEF4)/100.0);
       Temp1 = _temperature_actual / 100.0;
-      SplitAndLoad(0x28, long(Pressure*1000.0));              //Schema 1: pressure, int32, µBar (Block 1)
-      SplitAndLoad(0x2C, (unsigned int)(int16_t)_temperature_actual); //Schema 1: temp MS5803, int16, 0.01°C (Block 1)
+      SplitAndLoad(0x48, long(Pressure*1000.0));              //Schema 1: pressure, int32, µBar (Block 1)
+      SplitAndLoad(0x4C, (unsigned int)(int16_t)_temperature_actual); //Schema 1: temp MS5803, int16, 0.01°C (Block 1)
     }
     if(doMCP9808) {
       Temp0 = getTemp(); //DEBUG!
-      SplitAndLoad(0x30, (unsigned int)(int16_t)(Temp0*100.0));       //Schema 1: temp ext, int16, 0.01°C (Block 2)
+      SplitAndLoad(0x50, (unsigned int)(int16_t)(Temp0*100.0));       //Schema 1: temp ext, int16, 0.01°C (Block 2)
     }
 
     //Reading complete: copy the staged data in, load status and fault, bump
@@ -334,7 +335,7 @@ void loop() {
     cli();
     memcpy(Reg + DATA_BASE, Staged, DATA_LEN); //The whole reading appears at once, with its counter
     Reg[REG_COUNTER] = count & 0xFF; Reg[REG_COUNTER + 1] = count >> 8;
-    Reg[REG_STATUS] = status; //Set ready flag (Page 1 status byte, bit 0)
+    Reg[REG_STATUS] = status; //Set ready flag (Page 2 status byte, bit 0)
     sei();
     // digitalWrite(9, LOW); //DEBUG!
     StartSample = false; //Clear flag when new values updated  
@@ -502,7 +503,7 @@ int ReadWord_LE(uint8_t Adr, uint8_t Command)  //Send command value, returns ent
   // return ((ByteHigh << 8) | ByteLow); //DEBUG!
 }
 
-void SplitAndLoad(uint8_t Pos, unsigned int Val) //Write 16 bits into the staged reading; Pos is the Page 1 register address
+void SplitAndLoad(uint8_t Pos, unsigned int Val) //Write 16 bits into the staged reading; Pos is the Page 2 register address
 {
   uint8_t Len = sizeof(Val);
   for(int i = Pos; i < Pos + Len; i++) {
