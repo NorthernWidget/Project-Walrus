@@ -199,11 +199,11 @@ Using an AVR ISP, upload the proper firmware programs from the ["Firmware" direc
 
 ## Register map and firmware internals
 
-The Walrus firmware runs on an ATtiny1634 microcontroller and exposes an I2C register map to the host logger. The default I2C address is `0x4D`.
+The Walrus firmware runs on an ATtiny1634 microcontroller and exposes an I2C register map to the host logger. The default I2C address is `0x57` (Schema 1 `'W'`; the address stored in Page 0 byte `0x1F` overrides it).
 
-Two layouts exist: the **current firmware** (deployed) and the **proposed** layout under [NW-Device-Specification](https://github.com/NorthernWidget/NW-Device-Specification) Schema 1, which the firmware will be updated to implement.
+The firmware on `master` implements [NW-Device-Specification](https://github.com/NorthernWidget/NW-Device-Specification) Schema 1 (firmware patch 1, 2026-09-23, unreleased and not yet validated on hardware: #18). The layout that the last released firmware exposed is kept below for anyone reading a deployed unit.
 
-### Current register map (deployed firmware)
+### Legacy register map (firmware before Schema 1)
 
 26-byte array. Identity fields (MODEL, GROUPID, INDID, FIRMWAREID) mixed into sensor data. Status ready flag is bit 7.
 
@@ -220,9 +220,9 @@ Two layouts exist: the **current firmware** (deployed) and the **proposed** layo
 0x16–0x17   FIRMWAREID    uint16 (0x0001)
 ```
 
-### Proposed register map (NW-Device-Specification Schema 1)
+### Register map (NW-Device-Specification Schema 1)
 
-Two 32-byte pages. Identity moves entirely to Page 0 (EEPROM). Sensor data in Page 1 (SRAM). No calibration page (MS5803 coefficients are read from its internal PROM at startup).
+Two 32-byte pages. Identity lives entirely in Page 0 (EEPROM, written by [NW-Provision](https://github.com/NorthernWidget/NW-Provision); the firmware copies it to the register array at boot, checks the CRC, and substitutes its own patch version at `0x0A`). Sensor data in Page 1 (SRAM). No calibration page (MS5803 coefficients are read from its internal PROM at startup). A controller sets a start register with a one-byte write and then reads up to 32 bytes with auto-increment.
 
 **Page 0 (0x00–0x1F) — Identity (EEPROM)**
 
@@ -247,9 +247,9 @@ Block 2 (0x10–0x17)   Serial number
 
 Block 3 (0x18–0x1F)   Integrity + administration
   0x18–0x1C   0x00 ×5           Reserved
-  0x1D        0x00              Magic byte (reserved; purpose TBD)
-  0x1E        [computed]        CRC-8 of bytes 0x00–0x1D
-  0x1F        0x4D              I2C address (writable; 0xFF = use default)
+  0x1D        0x4E              Magic byte
+  0x1E        [computed]        CRC-8/SMBUS of bytes 0x00–0x1D
+  0x1F        0x57              I2C address (writable over I2C; persisted to EEPROM; 0xFF = use default)
 ```
 
 **Page 1 (0x20–0x3F) — Sensor data (SRAM)**
@@ -261,7 +261,7 @@ Chip table:
 | 0 | MS5803 | pressure, temperature |
 | 1 | MCP9808 | external (water) temperature |
 
-Block 0 (0x20–0x27) is the universal block defined by [NW-Device-Specification](https://github.com/NorthernWidget/NW-Device-Specification#page-1--sensor-data): status (ready, per-chip fault bits, pan-fault), control (trigger, chip select, sleep), reading counter, device config byte at 0x26, latched fault code at 0x27. Device data begins at 0x28. Config (0x26): bits 1:0 = free-running update period, 0 = 5 s, 1 = 10 s, 2 = 60 s, 3 = 300 s; bits 7:2 reserved.
+Block 0 (0x20–0x27) is the universal block defined by [NW-Device-Specification](https://github.com/NorthernWidget/NW-Device-Specification#page-1--sensor-data). On Walrus: a reading starts on a trigger (Control `0x21` bit 0) or on the free-running timer that Config `0x26` bits 1:0 select (0 = 5 s, 1 = 10 s, 2 = 60 s, 3 = 300 s); Control bit 1 selects the MS5803 and bit 2 the MCP9808; ready (Status `0x20` bit 0) clears while the chips are read and returns with the reading counter (`0x22–0x23`) incremented; a chip that does not acknowledge sets its status bit (bit 1 MS5803, bit 2 MCP9808, bit 7 summary) and latches kind 1 in the fault byte `0x27`, which the next Control write clears; boot latches unit kind 6 (reset), or kind 3 if Page 0 failed its CRC. The readings-requested word (`0x24–0x25`) is accepted but changes nothing: no chip on Walrus is powered per batch. Sleep (Control bit 7) is accepted and ignored. The main loop polls every 100 ms, so a trigger is answered within about 100 ms plus the MS5803 conversion time: status (ready, per-chip fault bits, pan-fault), control (trigger, chip select, sleep), reading counter, device config byte at 0x26, latched fault code at 0x27. Device data begins at 0x28. Config (0x26): bits 1:0 = free-running update period, 0 = 5 s, 1 = 10 s, 2 = 60 s, 3 = 300 s; bits 7:2 reserved.
 
 ```
 Block 1 (0x28–0x2F)   MS5803 — pressure + temperature
