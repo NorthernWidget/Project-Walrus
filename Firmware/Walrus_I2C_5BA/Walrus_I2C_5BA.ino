@@ -194,7 +194,11 @@ uint8_t Config = 0; //Global config value
 
 uint8_t Reg[96] = {0}; //Initialize registers; 0x00–0x1F = Page 0 (identity), 0x20–0x3F = Page 1 (calibration: none on Walrus; served from EEPROM as stored), 0x40–0x47 = Page 2 Block 0 (status/control), 0x48–0x5F = Page 2 sensor data
 #define DATA_BASE 0x48 //First sensor data register (Page 2 Block 1)
-#define DATA_LEN  10   //0x48–0x51: the bytes a reading writes
+#define DATA_LEN  24   //0x48–0x5F: Blocks 1 to 3, every byte a reading writes.
+                       //Must cover the highest register SplitAndLoad is given:
+                       //it indexes Staged[Pos - DATA_BASE] with no bound of its
+                       //own, so a short DATA_LEN writes past the buffer and the
+                       //memcpy below silently drops what it did not cover.
 uint8_t Staged[DATA_LEN] = {0}; //A reading is assembled here and copied into Reg with the counter, so a page read never sees half a reading (spec: atomic rewrite)
 bool page0Valid = false; //Page 0 CRC matched what NW-Provision wrote
 
