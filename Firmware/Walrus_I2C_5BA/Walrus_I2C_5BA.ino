@@ -83,7 +83,7 @@
 //library. The hardware version lives in Page 0 (EEPROM), written at
 //provisioning; the firmware writes this constant into the served copy of
 //Page 0 at 0x0A and recomputes the CRC there (NW-Device-Specification).
-#define FW_FW_PATCH 1
+#define FW_FW_PATCH 2
 #ifndef FW_COMMIT
 #define FW_COMMIT "" //Set by the build wrapper (NW-Build) as -DFW_COMMIT="a1b2c3d4+"; blank in an IDE build
 #endif
@@ -158,6 +158,11 @@ uint16_t coefficient[8];// Coefficients;
 
 int32_t _temperature_actual;
 int32_t _pressure_actual;
+//The ADC conversions the compensation is computed from: D1 and D2 in the
+//MS5803's own units. Served whole so a reading can be checked afterwards, and
+//so that a controller which knows the variant can compensate for itself.
+uint32_t _pressure_adc;
+uint32_t _temperature_adc;
 
 float Pressure = 0; // MS5803 pressure
 float Temp0 = 0; // Global tempurature from thermistor
@@ -342,6 +347,8 @@ void loop() {
       Temp1 = _temperature_actual / 100.0;
       SplitAndLoad(0x48, long(Pressure*1000.0));              //Schema 1: pressure, int32, µBar (Block 1)
       SplitAndLoad(0x4C, (unsigned int)(int16_t)_temperature_actual); //Schema 1: temp MS5803, int16, 0.01°C (Block 1)
+      SplitAndLoad(0x58, long(_pressure_adc));                //Schema 1: D1, uint32, ADC counts (Block 3)
+      SplitAndLoad(0x5C, long(_temperature_adc));             //Schema 1: D2, uint32, ADC counts (Block 3)
     }
     if(doMCP9808) {
       Temp0 = getTemp(); //DEBUG!
@@ -641,6 +648,8 @@ void getMeasurements()
 
 	int32_t temperature_raw = getADCconversionMS5803(0x10);
 	int32_t pressure_raw = getADCconversionMS5803(0x00);
+	_pressure_adc = (uint32_t)pressure_raw;
+	_temperature_adc = (uint32_t)temperature_raw;
 	
 	
 	//Create Variables for calculations
