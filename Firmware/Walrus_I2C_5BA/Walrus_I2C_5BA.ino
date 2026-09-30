@@ -23,13 +23,6 @@
 
 #define CMD_PROM 0xA0 // Coefficient location
 
-//Which MS5803 is fitted, by the bar figure in its order code. This becomes the
-//Page 1 byte when the model is provisioned per board; until then a build is for
-//one part, as it has always been.
-#ifndef MS5803_MODEL
-#define MS5803_MODEL 5
-#endif
-
 //The calibration constants for the part that is fitted. Every variant is
 //converted by the same equations in getMeasurements(); only these numbers
 //differ, and setMS5803Model() gives them their values. Each is read from that
@@ -212,6 +205,7 @@ void setMS5803Model(uint8_t bar)
 //ATtiny1634): Page 0 (identity) at 0xC0-0xDF, written once by NW-Provision
 //and read at boot; Page 1 (calibration, none on Walrus) at 0xE0-0xFF, unused.
 #define PAGE0_BASE   (E2END + 1 - 64)
+#define PAGE1_MS5803_MODEL 0x20   //Page 1, first byte: the bar figure of the MS5803 that is fitted
 #define REG_I2C_ADDR 0x1F
 #define ADR_DEFAULT  0x57  //Schema 1 'W'; used when Page 0 byte 0x1F is 0xFF
 
@@ -231,6 +225,11 @@ void setMS5803Model(uint8_t bar)
 #define FAULT_MCP9808_NOACK 0x21  //chip 1, kind 1
 #define NOTICE_UNIT_RESET    0xE6  //unit (7), kind 6: reset since the controller last wrote Control (a notice: no status bit)
 #define NOTICE_UNIT_PAGE0    0xE3  //unit (7), kind 3: Page 0 CRC did not match (unprovisioned or corrupt)
+#define NOTICE_MS5803_NOMODEL 0x10 //chip 0, kind 16, a notice rather than a fault: Page 1 names no
+                                   //MS5803 this firmware knows, so nothing was converted. The chip
+                                   //answered and Block 3 carries its conversions, which are good
+                                   //data; setting the status bit would tell a controller to discard
+                                   //exactly what is worth keeping
 
 const uint8_t PresADR = 0x77;
 // const uint8_t TempADR = 0x18; 
@@ -388,8 +387,6 @@ volatile bool RepeatedStart = false; //Used to show if the start was repeated or
 
 void setup() {
 
-  setMS5803Model(MS5803_MODEL);   //becomes the Page 1 byte once it is provisioned
-
   pinMode(ModeSelPin, OUTPUT);
   digitalWrite(ModeSelPin, LOW); //Set device to I2C mode 
   // Serial.begin(115200); //DEBUG!
@@ -407,6 +404,7 @@ void setup() {
   // if(!digitalRead(ADR_SEL_PIN)) ADR = ADR_Alt; //If solder jumper is bridged, use alternate address //DEBUG!
 
   loadPage0();
+  setMS5803Model(Reg[PAGE1_MS5803_MODEL]);   //which MS5803 is fitted, as provisioned
   if(Reg[REG_I2C_ADDR] != 0xFF) ADR = Reg[REG_I2C_ADDR]; //Provisioned address; 0xFF = use default
   Reg[REG_REPORT] = page0Valid ? NOTICE_UNIT_RESET : NOTICE_UNIT_PAGE0; //Latched until the controller writes Control
   Wire.begin(ADR);  //Begin slave I2C
@@ -469,12 +467,24 @@ void loop() {
     //LOAD VALUES
     if(doMS5803) {
       getMeasurements();
-      Pressure = _pressure_actual / MbarDivisor;
-      Temp1 = _temperature_actual / 100.0;
-      SplitAndLoad(0x48, long(Pressure*1000.0));              //Schema 1: pressure, int32, µBar (Block 1)
-      SplitAndLoad(0x4C, (unsigned int)(int16_t)_temperature_actual); //Schema 1: temp MS5803, int16, 0.01°C (Block 1)
       SplitAndLoad(0x58, long(_pressure_adc));                //Schema 1: D1, uint32, ADC counts (Block 3)
       SplitAndLoad(0x5C, long(_temperature_adc));             //Schema 1: D2, uint32, ADC counts (Block 3)
+      if(ModelKnown) {
+        Pressure = _pressure_actual / MbarDivisor;
+        Temp1 = _temperature_actual / 100.0;
+        SplitAndLoad(0x48, long(Pressure*1000.0));              //Schema 1: pressure, int32, µBar (Block 1)
+        SplitAndLoad(0x4C, (unsigned int)(int16_t)_temperature_actual); //Schema 1: temp MS5803, int16, 0.01°C (Block 1)
+      }
+      else {
+        //Page 1 names no MS5803 this firmware knows, so there is nothing to
+        //convert with. Block 3 above carries the conversions themselves, which
+        //a controller can compensate once the part is known; these two say
+        //plainly that no pressure was computed.
+        Pressure = NAN;
+        Temp1 = NAN;
+        SplitAndLoad(0x48, long(-9999));
+        SplitAndLoad(0x4C, (unsigned int)(int16_t)-9999);
+      }
     }
     if(doMCP9808) {
       Temp0 = getTemp(); //DEBUG!
@@ -486,6 +496,7 @@ void loop() {
     //straddles the update or sees a reading half written.
     uint8_t status = BIT_READY;
     if(doMS5803 && ms5803Fail) { status |= CHIP_MS5803; Reg[REG_REPORT] = FAULT_MS5803_NOACK; }
+    else if(doMS5803 && !ModelKnown) { Reg[REG_REPORT] = NOTICE_MS5803_NOMODEL; } //no status bit: see above
     if(doMCP9808 && mcp9808Fail) { status |= CHIP_MCP9808; Reg[REG_REPORT] = FAULT_MCP9808_NOACK; }
     if(status & 0x7E) status |= BIT_PANFAULT;
     uint16_t count = Reg[REG_COUNTER] | (Reg[REG_COUNTER + 1] << 8);
