@@ -23,6 +23,25 @@
 
 #define CMD_PROM 0xA0 // Coefficient location
 
+//What one acquisition has to say for itself. A fault means the chip's data are
+//not to be trusted, and the chip's Status bit is set; a notice reports
+//something the controller should know while the data still stand. These are
+//declared here, ahead of every function, because the Arduino build writes its
+//own prototypes at the first function definition.
+struct Acquisition
+{
+  uint8_t Report;  //A Report code, or 0 when there is nothing to report
+  bool Fault;
+};
+
+//One chip on the board: the bit that selects it in Control and marks it in
+//Status, and the one function that reads it.
+struct Chip
+{
+  uint8_t Bit;
+  Acquisition (*Acquire)(void);
+};
+
 //The calibration constants for the part that is fitted. Every variant is
 //converted by the same equations in getMeasurements(); only these numbers
 //differ, and setMS5803Model() gives them their values. Each is read from that
@@ -440,6 +459,77 @@ void setup() {
   // digitalWrite(10, LOW); //DEBUG!
 }
 
+//ACQUISITION
+//One chip, one acquisition, publishing every value that acquisition produced.
+//Nothing here touches Status, the reading counter or the registers themselves:
+//the loop owns those, so every chip is recorded the same way.
+
+Acquisition acquireMS5803()
+{
+  ms5803Fail = false;
+  getMeasurements();
+  SplitAndLoad(0x58, long(_pressure_adc));                //Schema 1: D1, uint32, ADC counts (Block 3)
+  SplitAndLoad(0x5C, long(_temperature_adc));             //Schema 1: D2, uint32, ADC counts (Block 3)
+  if(ModelKnown)
+  {
+    Pressure = _pressure_actual / MbarDivisor;
+    Temp1 = _temperature_actual / 100.0;
+    SplitAndLoad(0x48, long(Pressure*1000.0));              //Schema 1: pressure, int32, µBar (Block 1)
+    SplitAndLoad(0x4C, (unsigned int)(int16_t)_temperature_actual); //Schema 1: temp MS5803, int16, 0.01°C (Block 1)
+  }
+  else
+  {
+    //Page 1 names no MS5803 this firmware knows, so there is nothing to
+    //convert with. Block 3 above carries the conversions themselves, which
+    //a controller can compensate once the part is known; these two say
+    //plainly that no pressure was computed.
+    Pressure = NAN;
+    Temp1 = NAN;
+    SplitAndLoad(0x48, long(-9999));
+    SplitAndLoad(0x4C, (unsigned int)(int16_t)-9999);
+  }
+
+  Acquisition Result;
+  Result.Report = 0;
+  Result.Fault = false;
+  if(ms5803Fail)
+  {
+    Result.Report = FAULT_MS5803_NOACK;
+    Result.Fault = true;
+  }
+  else if(!ModelKnown)
+  {
+    Result.Report = NOTICE_MS5803_NOMODEL; //A notice: the raw conversions above still stand
+  }
+  return Result;
+}
+
+Acquisition acquireMCP9808()
+{
+  mcp9808Fail = false;
+  Temp0 = getTemp();
+  SplitAndLoad(0x50, (unsigned int)(int16_t)(Temp0*100.0)); //Schema 1: temp ext, int16, 0.01°C (Block 2)
+
+  Acquisition Result;
+  Result.Report = 0;
+  Result.Fault = false;
+  if(mcp9808Fail)
+  {
+    Result.Report = FAULT_MCP9808_NOACK;
+    Result.Fault = true;
+  }
+  return Result;
+}
+
+//Every chip a reading takes, in order. Fitting another chip to this board is a
+//line here and one more acquire function; the reading loop does not change.
+const Chip Chips[] =
+{
+  {CHIP_MS5803,  acquireMS5803},
+  {CHIP_MCP9808, acquireMCP9808}
+};
+#define CHIP_COUNT (sizeof(Chips) / sizeof(Chips[0]))
+
 void loop() {
   // static unsigned int Count = 0; //Counter to determine update rate
   // uint8_t Ctrl = Reg[CTRL]; //Store local value to improve efficiency
@@ -459,45 +549,23 @@ void loop() {
     // digitalWrite(9, HIGH); //DEBUG!
     //A reading begins: clear ready, take the chip selection, consume the trigger.
     Reg[REG_STATUS] &= ~BIT_READY; //Clear ready flag (Page 2 status byte, bit 0) while new values are being written
-    bool doMS5803 = Reg[REG_CTRL] & CHIP_MS5803;
-    bool doMCP9808 = Reg[REG_CTRL] & CHIP_MCP9808;
+    uint8_t selected = Reg[REG_CTRL]; //Taken once: a controller write partway through must not change what this reading holds
     Reg[REG_CTRL] &= ~(BIT_TRIGGER | BIT_SLEEP); //trigger consumed; sleep not implemented
-    ms5803Fail = false;
-    mcp9808Fail = false;
+
     //LOAD VALUES
-    if(doMS5803) {
-      getMeasurements();
-      SplitAndLoad(0x58, long(_pressure_adc));                //Schema 1: D1, uint32, ADC counts (Block 3)
-      SplitAndLoad(0x5C, long(_temperature_adc));             //Schema 1: D2, uint32, ADC counts (Block 3)
-      if(ModelKnown) {
-        Pressure = _pressure_actual / MbarDivisor;
-        Temp1 = _temperature_actual / 100.0;
-        SplitAndLoad(0x48, long(Pressure*1000.0));              //Schema 1: pressure, int32, µBar (Block 1)
-        SplitAndLoad(0x4C, (unsigned int)(int16_t)_temperature_actual); //Schema 1: temp MS5803, int16, 0.01°C (Block 1)
-      }
-      else {
-        //Page 1 names no MS5803 this firmware knows, so there is nothing to
-        //convert with. Block 3 above carries the conversions themselves, which
-        //a controller can compensate once the part is known; these two say
-        //plainly that no pressure was computed.
-        Pressure = NAN;
-        Temp1 = NAN;
-        SplitAndLoad(0x48, long(-9999));
-        SplitAndLoad(0x4C, (unsigned int)(int16_t)-9999);
-      }
-    }
-    if(doMCP9808) {
-      Temp0 = getTemp(); //DEBUG!
-      SplitAndLoad(0x50, (unsigned int)(int16_t)(Temp0*100.0));       //Schema 1: temp ext, int16, 0.01°C (Block 2)
+    //Each chip Control selects, in turn, and whatever its acquisition reports.
+    //A fault marks the chip in Status; a notice does not.
+    uint8_t status = BIT_READY;
+    for(uint8_t chip = 0; chip < CHIP_COUNT; chip++) {
+      if((selected & Chips[chip].Bit) == 0) continue; //Not selected in Control
+      Acquisition Result = Chips[chip].Acquire();
+      if(Result.Report) Reg[REG_REPORT] = Result.Report;
+      if(Result.Fault) status |= Chips[chip].Bit;
     }
 
     //Reading complete: copy the staged data in, load status and fault, bump
     //the counter, set ready. Atomic so a controller's page read never
     //straddles the update or sees a reading half written.
-    uint8_t status = BIT_READY;
-    if(doMS5803 && ms5803Fail) { status |= CHIP_MS5803; Reg[REG_REPORT] = FAULT_MS5803_NOACK; }
-    else if(doMS5803 && !ModelKnown) { Reg[REG_REPORT] = NOTICE_MS5803_NOMODEL; } //no status bit: see above
-    if(doMCP9808 && mcp9808Fail) { status |= CHIP_MCP9808; Reg[REG_REPORT] = FAULT_MCP9808_NOACK; }
     if(status & 0x7E) status |= BIT_PANFAULT;
     uint16_t count = Reg[REG_COUNTER] | (Reg[REG_COUNTER + 1] << 8);
     count++;
