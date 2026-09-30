@@ -23,59 +23,179 @@
 
 #define CMD_PROM 0xA0 // Coefficient location
 
-// //COEFS for MS5803_05BA
-#define COEF0 18
-#define COEF1 5
-#define COEF2 17
-#define COEF3 7
-#define COEF4 10000
-#define COEF5 3
-#define COEF6 33
-#define COEF7 3
-#define COEF8 3
-#define COEF9 7
-#define COEF10 3
-#define COEF11 0
-#define COEF12 3
-#define COEF13 0
-#define COEF14 0
-#define COEF15 0
+//Which MS5803 is fitted, by the bar figure in its order code. This becomes the
+//Page 1 byte when the model is provisioned per board; until then a build is for
+//one part, as it has always been.
+#ifndef MS5803_MODEL
+#define MS5803_MODEL 5
+#endif
 
-//COEFS for MS5803_02BA
-// #define COEF0 17
-// #define COEF1 6
-// #define COEF2 16
-// #define COEF3 7
-// #define COEF4 10000
-// #define COEF5 1
-// #define COEF6 31
-// #define COEF7 61
-// #define COEF8 4
-// #define COEF9 2
-// #define COEF10 0
-// #define COEF11 20
-// #define COEF12 12
-// #define COEF13 0
-// #define COEF14 0
-// #define COEF15 0
+//The calibration constants for the part that is fitted. Every variant is
+//converted by the same equations in getMeasurements(); only these numbers
+//differ, and setMS5803Model() gives them their values. Each is read from that
+//variant's "PRESSURE AND TEMPERATURE CALCULATION" and "SECOND ORDER TEMPERATURE
+//COMPENSATION" pages.
+uint8_t OffShift;           //OFF  = C2 << OffShift + (C4 * dT) >> OffDtShift
+uint8_t OffDtShift;
+uint8_t SensShift;          //SENS = C1 << SensShift + (C3 * dT) >> SensDtShift
+uint8_t SensDtShift;
+uint8_t MbarDivisor;        //the converted value divided by this is mbar
+uint8_t T2MultCold;         //below 20 C
+uint8_t T2ShiftCold;
+uint8_t Off2MultCold;
+uint8_t Off2ShiftCold;
+uint8_t Sens2MultCold;
+uint8_t Sens2ShiftCold;
+uint8_t Off2MultVeryCold;   //below -15 C
+uint8_t Sens2MultVeryCold;
+uint8_t T2MultHot;          //20 C and above
+uint8_t T2ShiftHot;
+uint8_t Off2MultHot;
+uint8_t Sens2MultVeryHot;   //above 45 C, the 01BA alone
+uint8_t PShift;             //P = (D1 * SENS / 2^21 - OFF) / 2^PShift
+bool ModelKnown;            //false when setMS5803Model() was given no such part
 
-//COEFS for MS5803_14BA
-// #define COEF0 16
-// #define COEF1 7
-// #define COEF2 15
-// #define COEF3 8
-// #define COEF4 1000
-// #define COEF5 3
-// #define COEF6 33
-// #define COEF7 3
-// #define COEF8 1
-// #define COEF9 5
-// #define COEF10 3
-// #define COEF11 7
-// #define COEF12 4
-// #define COEF13 7
-// #define COEF14 37
-// #define COEF15 1
+void setMS5803Model(uint8_t bar)
+// The calibration constants for the part that is fitted, from the bar figure in
+// its order code. A wrong number here gives a confidently wrong pressure and
+// raises no fault, so MS5803/extras/test/compensation_check.py compares every
+// one of them with the datasheets. Run it after any edit.
+{
+  ModelKnown = true;
+
+  switch(bar)
+  {
+    case (1):   //MS5803-01BA
+      OffShift = 16;
+      OffDtShift = 7;
+      SensShift = 15;
+      SensDtShift = 8;
+      MbarDivisor = 100;
+      T2MultCold = 1;
+      T2ShiftCold = 31;
+      Off2MultCold = 3;
+      Off2ShiftCold = 0;
+      Sens2MultCold = 7;
+      Sens2ShiftCold = 3;
+      Off2MultVeryCold = 0;
+      Sens2MultVeryCold = 2;
+      T2MultHot = 0;
+      T2ShiftHot = 0;
+      Off2MultHot = 0;
+      PShift = 15;
+      Sens2MultVeryHot = 1;
+      break;
+
+    case (2):   //MS5803-02BA
+      OffShift = 17;
+      OffDtShift = 6;
+      SensShift = 16;
+      SensDtShift = 7;
+      MbarDivisor = 100;
+      T2MultCold = 1;
+      T2ShiftCold = 31;
+      Off2MultCold = 61;
+      Off2ShiftCold = 4;
+      Sens2MultCold = 2;
+      Sens2ShiftCold = 0;
+      Off2MultVeryCold = 20;
+      Sens2MultVeryCold = 12;
+      T2MultHot = 0;
+      T2ShiftHot = 0;
+      Off2MultHot = 0;
+      PShift = 15;
+      Sens2MultVeryHot = 0;
+      break;
+
+    case (5):   //MS5803-05BA
+      OffShift = 18;
+      OffDtShift = 5;
+      SensShift = 17;
+      SensDtShift = 7;
+      MbarDivisor = 100;
+      T2MultCold = 3;
+      T2ShiftCold = 33;
+      Off2MultCold = 3;
+      Off2ShiftCold = 3;
+      Sens2MultCold = 7;
+      Sens2ShiftCold = 3;
+      Off2MultVeryCold = 0;
+      Sens2MultVeryCold = 3;
+      T2MultHot = 0;
+      T2ShiftHot = 0;
+      Off2MultHot = 0;
+      PShift = 15;
+      Sens2MultVeryHot = 0;
+      break;
+
+    case (7):   //MS5803-07BA
+      OffShift = 18;
+      OffDtShift = 5;
+      SensShift = 17;
+      SensDtShift = 6;
+      MbarDivisor = 100;
+      T2MultCold = 3;
+      T2ShiftCold = 33;
+      Off2MultCold = 3;
+      Off2ShiftCold = 3;
+      Sens2MultCold = 7;
+      Sens2ShiftCold = 3;
+      Off2MultVeryCold = 0;
+      Sens2MultVeryCold = 3;
+      T2MultHot = 0;
+      T2ShiftHot = 0;
+      Off2MultHot = 0;
+      PShift = 15;
+      Sens2MultVeryHot = 0;
+      break;
+
+    case (14):   //MS5803-14BA
+      OffShift = 16;
+      OffDtShift = 7;
+      SensShift = 15;
+      SensDtShift = 8;
+      MbarDivisor = 10;
+      T2MultCold = 3;
+      T2ShiftCold = 33;
+      Off2MultCold = 3;
+      Off2ShiftCold = 1;
+      Sens2MultCold = 5;
+      Sens2ShiftCold = 3;
+      Off2MultVeryCold = 7;
+      Sens2MultVeryCold = 4;
+      T2MultHot = 7;
+      T2ShiftHot = 37;
+      Off2MultHot = 1;
+      PShift = 15;
+      Sens2MultVeryHot = 0;
+      break;
+
+    case (30):   //MS5803-30BA
+      OffShift = 16;
+      OffDtShift = 7;
+      SensShift = 15;
+      SensDtShift = 8;
+      MbarDivisor = 10;
+      T2MultCold = 3;
+      T2ShiftCold = 33;
+      Off2MultCold = 3;
+      Off2ShiftCold = 1;
+      Sens2MultCold = 5;
+      Sens2ShiftCold = 3;
+      Off2MultVeryCold = 7;
+      Sens2MultVeryCold = 4;
+      T2MultHot = 7;
+      T2ShiftHot = 37;
+      Off2MultHot = 1;
+      PShift = 13;
+      Sens2MultVeryHot = 0;
+      break;
+
+    default:   //no such part: there is nothing to convert with
+      ModelKnown = false;
+      break;
+  }
+}
 
 #define CTRL 0x46  //Define location of onboard control/confiuration register (Schema 1 Page 2 Config byte; was 0x00, which is now the Page 0 schema byte)
 
@@ -268,6 +388,8 @@ volatile bool RepeatedStart = false; //Used to show if the start was repeated or
 
 void setup() {
 
+  setMS5803Model(MS5803_MODEL);   //becomes the Page 1 byte once it is provisioned
+
   pinMode(ModeSelPin, OUTPUT);
   digitalWrite(ModeSelPin, LOW); //Set device to I2C mode 
   // Serial.begin(115200); //DEBUG!
@@ -347,7 +469,7 @@ void loop() {
     //LOAD VALUES
     if(doMS5803) {
       getMeasurements();
-      Pressure = _pressure_actual / (float(COEF4)/100.0);
+      Pressure = _pressure_actual / MbarDivisor;
       Temp1 = _temperature_actual / 100.0;
       SplitAndLoad(0x48, long(Pressure*1000.0));              //Schema 1: pressure, int32, µBar (Block 1)
       SplitAndLoad(0x4C, (unsigned int)(int16_t)_temperature_actual); //Schema 1: temp MS5803, int16, 0.01°C (Block 1)
@@ -602,7 +724,7 @@ uint8_t getValues()
 {
     // Update global values from sensors
     getMeasurements();
-    Pressure = _pressure_actual / (float(COEF4)/100.0);
+    Pressure = _pressure_actual / MbarDivisor;
     Temp0 = getTemp(); //DEBUG!
     // Temp0 = 26.25; //DEBUG!
     Temp1 = _temperature_actual / 100.0;
@@ -674,29 +796,37 @@ void getMeasurements()
 	if (temp_calc < 2000) 
 	// If temp_calc is below 20.0C
 	{	
-		T2 = COEF5 * (((int64_t)dT * dT) >> COEF6);
-		OFF2 = COEF7 * ((temp_calc - 2000) * (temp_calc - 2000)) / (pow(2,COEF8));
-		SENS2 = COEF9 * ((temp_calc - 2000) * (temp_calc - 2000)) / (pow(2,COEF10));
+		T2 = T2MultCold * (((int64_t)dT * dT) >> T2ShiftCold);
+		OFF2 = Off2MultCold * ((int64_t)(temp_calc - 2000) * (temp_calc - 2000)) / ((int64_t)1 << Off2ShiftCold);
+		SENS2 = Sens2MultCold * ((int64_t)(temp_calc - 2000) * (temp_calc - 2000)) / ((int64_t)1 << Sens2ShiftCold);
 		
 		if(temp_calc < -1500)
 		// If temp_calc is below -15.0C 
 		{
-			OFF2 = OFF2 + COEF11 * ((temp_calc + 1500) * (temp_calc + 1500));
-			SENS2 = SENS2 + COEF12 * ((temp_calc + 1500) * (temp_calc + 1500));
+			OFF2 = OFF2 + Off2MultVeryCold * ((temp_calc + 1500) * (temp_calc + 1500));
+			SENS2 = SENS2 + Sens2MultVeryCold * ((temp_calc + 1500) * (temp_calc + 1500));
 		}
-    } 
+	}
 	else
 	// If temp_calc is above 20.0C
 	{ 
-		T2 = COEF13 * ((uint64_t)dT * dT)/pow(2,COEF14);
-		OFF2 = COEF15 * ((temp_calc - 2000) * (temp_calc - 2000)) / 16;
+		T2 = T2MultHot * ((int64_t)dT * dT) / ((int64_t)1 << T2ShiftHot);
+		OFF2 = Off2MultHot * ((int64_t)(temp_calc - 2000) * (temp_calc - 2000)) / 16;
 		SENS2 = 0;
+		
+		if(temp_calc > 4500)
+		// If temp_calc is above 45.0C; Sens2MultVeryHot is one on the 01BA,
+		// whose flow chart alone carries this term, and zero on every other
+		// variant, where it subtracts nothing
+		{
+			SENS2 = SENS2 - Sens2MultVeryHot * ((int64_t)(temp_calc - 4500) * (temp_calc - 4500)) / 8;
+		}
 	}
 	
 	// Now bring it all together to apply offsets 
 	
-	OFF = ((int64_t)coefficient[2] << COEF0) + (((coefficient[4] * (int64_t)dT)) >> COEF1);
-	SENS = ((int64_t)coefficient[1] << COEF2) + (((coefficient[3] * (int64_t)dT)) >> COEF3);
+	OFF = ((int64_t)coefficient[2] << OffShift) + (((coefficient[4] * (int64_t)dT)) >> OffDtShift);
+	SENS = ((int64_t)coefficient[1] << SensShift) + (((coefficient[3] * (int64_t)dT)) >> SensDtShift);
 	
 	temp_calc = temp_calc - T2;
 	OFF = OFF - OFF2;
@@ -705,7 +835,7 @@ void getMeasurements()
 	// Now lets calculate the pressure
 	
 
-	pressure_calc = (((SENS * pressure_raw) / 2097152 ) - OFF) / 32768;
+	pressure_calc = (((SENS * pressure_raw) / 2097152 ) - OFF) / ((int64_t)1 << PShift);
 	
 	_temperature_actual = temp_calc ;
 	_pressure_actual = pressure_calc ; // 10;// pressure_calc;
