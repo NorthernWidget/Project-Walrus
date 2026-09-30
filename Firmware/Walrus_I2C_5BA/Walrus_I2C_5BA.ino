@@ -14,7 +14,6 @@
 #include <SlowSoftWire.h>
 #include <Wire.h>
 #include <EEPROM.h>
-#include <avr/pgmspace.h>
 // #include <EEPROM.h> //DEBUG!
 //Commands
 
@@ -24,44 +23,59 @@
 
 #define CMD_PROM 0xA0 // Coefficient location
 
-//Which MS5803 is fitted. The variants answer the same commands and differ only
-//in the constants below, so this selects a row rather than a code path. It
-//moves to Page 1 when the variant is provisioned per board; until then a build
-//is for one part, as it has always been.
-//  0 = 01BA   1 = 02BA   2 = 05BA   3 = 07BA   4 = 14BA   5 = 30BA
-#ifndef MS5803_VARIANT
-  #define MS5803_VARIANT 2
-#endif
+// //COEFS for MS5803_05BA
+#define COEF0 18
+#define COEF1 5
+#define COEF2 17
+#define COEF3 7
+#define COEF4 10000
+#define COEF5 3
+#define COEF6 33
+#define COEF7 3
+#define COEF8 3
+#define COEF9 7
+#define COEF10 3
+#define COEF11 0
+#define COEF12 3
+#define COEF13 0
+#define COEF14 0
+#define COEF15 0
 
-//Conversion constants, one row per variant, from each datasheet's "PRESSURE AND
-//TEMPERATURE CALCULATION" and "SECOND ORDER TEMPERATURE COMPENSATION" pages.
-//The same table the MS5803 library carries, checked against the same datasheets
-//by MS5803/extras/test/compensation_check.py.
-//
-//  [0]  OFF  = C2 << [0]                [9]  SENS2 low-temp multiplier
-//  [1]         + (C4 * dT) >> [1]       [10] SENS2 low-temp divisor exponent
-//  [2]  SENS = C1 << [2]                [11] OFF2 very-low-temp multiplier
-//  [3]         + (C3 * dT) >> [3]       [12] SENS2 very-low-temp multiplier
-//  [4]  100 x the divisor from the      [13] T2 high-temp multiplier
-//       compensated value to mbar       [14] T2 high-temp divisor exponent
-//  [5]  T2 low-temp multiplier          [15] OFF2 high-temp multiplier
-//  [6]  T2 low-temp divisor exponent    [16] final pressure divisor exponent
-//  [7]  OFF2 low-temp multiplier        [17] SENS2 very-high-temp multiplier
-//  [8]  OFF2 low-temp divisor exponent
-//
-//The 07BA is served to first and second order only: above 1100 mbar it applies
-//a further correction from C7 and C8 in PROM word 7, which neither this
-//firmware nor the library implements.
-static const uint16_t ConvTable[6][18] PROGMEM = {
-  {16, 7, 15, 8, 10000, 1, 31,  3, 0, 7, 3,  0,  2, 0,  0, 0, 15, 1},  //01BA
-  {17, 6, 16, 7, 10000, 1, 31, 61, 4, 2, 0, 20, 12, 0,  0, 0, 15, 0},  //02BA
-  {18, 5, 17, 7, 10000, 3, 33,  3, 3, 7, 3,  0,  3, 0,  0, 0, 15, 0},  //05BA
-  {18, 5, 17, 6, 10000, 3, 33,  3, 3, 7, 3,  0,  3, 0,  0, 0, 15, 0},  //07BA
-  {16, 7, 15, 8,  1000, 3, 33,  3, 1, 5, 3,  7,  4, 7, 37, 1, 15, 0},  //14BA
-  {16, 7, 15, 8,  1000, 3, 33,  3, 1, 5, 3,  7,  4, 7, 37, 1, 13, 0},  //30BA
-};
-//The fitted part's row, copied out of flash once at startup.
-uint16_t Coef[18];
+//COEFS for MS5803_02BA
+// #define COEF0 17
+// #define COEF1 6
+// #define COEF2 16
+// #define COEF3 7
+// #define COEF4 10000
+// #define COEF5 1
+// #define COEF6 31
+// #define COEF7 61
+// #define COEF8 4
+// #define COEF9 2
+// #define COEF10 0
+// #define COEF11 20
+// #define COEF12 12
+// #define COEF13 0
+// #define COEF14 0
+// #define COEF15 0
+
+//COEFS for MS5803_14BA
+// #define COEF0 16
+// #define COEF1 7
+// #define COEF2 15
+// #define COEF3 8
+// #define COEF4 1000
+// #define COEF5 3
+// #define COEF6 33
+// #define COEF7 3
+// #define COEF8 1
+// #define COEF9 5
+// #define COEF10 3
+// #define COEF11 7
+// #define COEF12 4
+// #define COEF13 7
+// #define COEF14 37
+// #define COEF15 1
 
 #define CTRL 0x46  //Define location of onboard control/confiuration register (Schema 1 Page 2 Config byte; was 0x00, which is now the Page 0 schema byte)
 
@@ -254,9 +268,6 @@ volatile bool RepeatedStart = false; //Used to show if the start was repeated or
 
 void setup() {
 
-  //The fitted variant's constants, out of flash and into RAM once.
-  for(uint8_t i = 0; i < 18; i++) Coef[i] = pgm_read_word(&ConvTable[MS5803_VARIANT][i]);
-
   pinMode(ModeSelPin, OUTPUT);
   digitalWrite(ModeSelPin, LOW); //Set device to I2C mode 
   // Serial.begin(115200); //DEBUG!
@@ -336,7 +347,7 @@ void loop() {
     //LOAD VALUES
     if(doMS5803) {
       getMeasurements();
-      Pressure = _pressure_actual / (float(Coef[4])/100.0);
+      Pressure = _pressure_actual / (float(COEF4)/100.0);
       Temp1 = _temperature_actual / 100.0;
       SplitAndLoad(0x48, long(Pressure*1000.0));              //Schema 1: pressure, int32, µBar (Block 1)
       SplitAndLoad(0x4C, (unsigned int)(int16_t)_temperature_actual); //Schema 1: temp MS5803, int16, 0.01°C (Block 1)
@@ -591,7 +602,7 @@ uint8_t getValues()
 {
     // Update global values from sensors
     getMeasurements();
-    Pressure = _pressure_actual / (float(Coef[4])/100.0);
+    Pressure = _pressure_actual / (float(COEF4)/100.0);
     Temp0 = getTemp(); //DEBUG!
     // Temp0 = 26.25; //DEBUG!
     Temp1 = _temperature_actual / 100.0;
@@ -663,32 +674,29 @@ void getMeasurements()
 	if (temp_calc < 2000) 
 	// If temp_calc is below 20.0C
 	{	
-		T2 = Coef[5] * (((int64_t)dT * dT) >> Coef[6]);
-		OFF2 = Coef[7] * ((int64_t)(temp_calc - 2000) * (temp_calc - 2000)) / ((int64_t)1 << Coef[8]);
-		SENS2 = Coef[9] * ((int64_t)(temp_calc - 2000) * (temp_calc - 2000)) / ((int64_t)1 << Coef[10]);
+		T2 = COEF5 * (((int64_t)dT * dT) >> COEF6);
+		OFF2 = COEF7 * ((temp_calc - 2000) * (temp_calc - 2000)) / (pow(2,COEF8));
+		SENS2 = COEF9 * ((temp_calc - 2000) * (temp_calc - 2000)) / (pow(2,COEF10));
 		
 		if(temp_calc < -1500)
 		// If temp_calc is below -15.0C 
 		{
-			OFF2 = OFF2 + Coef[11] * ((temp_calc + 1500) * (temp_calc + 1500));
-			SENS2 = SENS2 + Coef[12] * ((temp_calc + 1500) * (temp_calc + 1500));
+			OFF2 = OFF2 + COEF11 * ((temp_calc + 1500) * (temp_calc + 1500));
+			SENS2 = SENS2 + COEF12 * ((temp_calc + 1500) * (temp_calc + 1500));
 		}
     } 
 	else
 	// If temp_calc is above 20.0C
 	{ 
-		T2 = Coef[13] * ((int64_t)dT * dT) / ((int64_t)1 << Coef[14]);
-		OFF2 = Coef[15] * ((int64_t)(temp_calc - 2000) * (temp_calc - 2000)) / 16;
+		T2 = COEF13 * ((uint64_t)dT * dT)/pow(2,COEF14);
+		OFF2 = COEF15 * ((temp_calc - 2000) * (temp_calc - 2000)) / 16;
 		SENS2 = 0;
-		//Entry 17 is 1 on the 01BA, whose flow chart alone carries this term,
-		//and 0 on every other variant, where it subtracts nothing.
-		if(temp_calc > 4500) SENS2 = SENS2 - Coef[17] * ((int64_t)(temp_calc - 4500) * (temp_calc - 4500)) / 8;
 	}
 	
 	// Now bring it all together to apply offsets 
 	
-	OFF = ((int64_t)coefficient[2] << Coef[0]) + (((coefficient[4] * (int64_t)dT)) >> Coef[1]);
-	SENS = ((int64_t)coefficient[1] << Coef[2]) + (((coefficient[3] * (int64_t)dT)) >> Coef[3]);
+	OFF = ((int64_t)coefficient[2] << COEF0) + (((coefficient[4] * (int64_t)dT)) >> COEF1);
+	SENS = ((int64_t)coefficient[1] << COEF2) + (((coefficient[3] * (int64_t)dT)) >> COEF3);
 	
 	temp_calc = temp_calc - T2;
 	OFF = OFF - OFF2;
@@ -697,7 +705,7 @@ void getMeasurements()
 	// Now lets calculate the pressure
 	
 
-	pressure_calc = (((SENS * pressure_raw) / 2097152 ) - OFF) / ((int64_t)1 << Coef[16]);
+	pressure_calc = (((SENS * pressure_raw) / 2097152 ) - OFF) / 32768;
 	
 	_temperature_actual = temp_calc ;
 	_pressure_actual = pressure_calc ; // 10;// pressure_calc;
