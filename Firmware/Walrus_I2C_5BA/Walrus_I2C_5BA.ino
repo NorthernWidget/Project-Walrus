@@ -410,7 +410,7 @@ void setup() {
   if(Reg[REG_I2C_ADDR] != 0xFF) ADR = Reg[REG_I2C_ADDR]; //Provisioned address; 0xFF = use default
   Reg[REG_REPORT] = page0Valid ? NOTICE_UNIT_RESET : NOTICE_UNIT_PAGE0; //Latched until the controller writes Control
   Wire.begin(ADR);  //Begin slave I2C
-	Wire.onRequest(requestEvent);     // register event
+  Wire.onRequest(requestEvent);     // register event
   Wire.onReceive(receiveEvent);
     si.begin(); //Must start AFTER hardware I2C!
   
@@ -748,8 +748,8 @@ void initTemp()
 
 void initMS5803()
 {
-	sendCommand(CMD_RESET);
-	delay(3); //Reset system 
+  sendCommand(CMD_RESET);
+  delay(3); //Reset system 
    uint8_t i;
    uint8_t Data[2] = {0};
 
@@ -768,78 +768,78 @@ void initMS5803()
 void getMeasurements()
 // Gets resuts from ADC and stores them into internal variables
 {
-	//Retrieve ADC result
-	// int32_t temperature_raw = getADCconversionMS5803(TEMPERATURE, _precision);
-	// int32_t pressure_raw = getADCconversionMS5803(PRESSURE, _precision);
+  //Retrieve ADC result
+  // int32_t temperature_raw = getADCconversionMS5803(TEMPERATURE, _precision);
+  // int32_t pressure_raw = getADCconversionMS5803(PRESSURE, _precision);
 
-	int32_t temperature_raw = getADCconversionMS5803(0x10);
-	int32_t pressure_raw = getADCconversionMS5803(0x00);
-	_pressure_adc = (uint32_t)pressure_raw;
-	_temperature_adc = (uint32_t)temperature_raw;
-	
-	
-	//Create Variables for calculations
-	int32_t temp_calc;
-	int32_t pressure_calc;
-	
-	int32_t dT;
-		
-	//Now that we have a raw temperature, let's compute our actual.
-	dT = temperature_raw - ((int32_t)coefficient[5] << 8);
-	temp_calc = (((int64_t)dT * coefficient[6]) >> 23) + 2000;
-	
-	// TODO TESTING  _temperature_actual = temp_calc;
-	
-	//Now we have our first order Temperature, let's calculate the second order.
-	int64_t T2, OFF2, SENS2, OFF, SENS; //working variables
+  int32_t temperature_raw = getADCconversionMS5803(0x10);
+  int32_t pressure_raw = getADCconversionMS5803(0x00);
+  _pressure_adc = (uint32_t)pressure_raw;
+  _temperature_adc = (uint32_t)temperature_raw;
+  
+  
+  //Create Variables for calculations
+  int32_t temp_calc;
+  int32_t pressure_calc;
+  
+  int32_t dT;
+    
+  //Now that we have a raw temperature, let's compute our actual.
+  dT = temperature_raw - ((int32_t)coefficient[5] << 8);
+  temp_calc = (((int64_t)dT * coefficient[6]) >> 23) + 2000;
+  
+  // TODO TESTING  _temperature_actual = temp_calc;
+  
+  //Now we have our first order Temperature, let's calculate the second order.
+  int64_t T2, OFF2, SENS2, OFF, SENS; //working variables
 
-	if (temp_calc < 2000) 
-	// If temp_calc is below 20.0C
-	{	
-		T2 = T2MultCold * (((int64_t)dT * dT) >> T2ShiftCold);
-		OFF2 = Off2MultCold * ((int64_t)(temp_calc - 2000) * (temp_calc - 2000)) / ((int64_t)1 << Off2ShiftCold);
-		SENS2 = Sens2MultCold * ((int64_t)(temp_calc - 2000) * (temp_calc - 2000)) / ((int64_t)1 << Sens2ShiftCold);
-		
-		if(temp_calc < -1500)
-		// If temp_calc is below -15.0C 
-		{
-			OFF2 = OFF2 + Off2MultVeryCold * ((temp_calc + 1500) * (temp_calc + 1500));
-			SENS2 = SENS2 + Sens2MultVeryCold * ((temp_calc + 1500) * (temp_calc + 1500));
-		}
-	}
-	else
-	// If temp_calc is above 20.0C
-	{ 
-		T2 = T2MultHot * ((int64_t)dT * dT) / ((int64_t)1 << T2ShiftHot);
-		OFF2 = Off2MultHot * ((int64_t)(temp_calc - 2000) * (temp_calc - 2000)) / 16;
-		SENS2 = 0;
-		
-		if(temp_calc > 4500)
-		// If temp_calc is above 45.0C; Sens2MultVeryHot is one on the 01BA,
-		// whose flow chart alone carries this term, and zero on every other
-		// variant, where it subtracts nothing
-		{
-			SENS2 = SENS2 - Sens2MultVeryHot * ((int64_t)(temp_calc - 4500) * (temp_calc - 4500)) / 8;
-		}
-	}
-	
-	// Now bring it all together to apply offsets 
-	
-	OFF = ((int64_t)coefficient[2] << OffShift) + (((coefficient[4] * (int64_t)dT)) >> OffDtShift);
-	SENS = ((int64_t)coefficient[1] << SensShift) + (((coefficient[3] * (int64_t)dT)) >> SensDtShift);
-	
-	temp_calc = temp_calc - T2;
-	OFF = OFF - OFF2;
-	SENS = SENS - SENS2;
+  if (temp_calc < 2000) 
+  // If temp_calc is below 20.0C
+  {  
+    T2 = T2MultCold * (((int64_t)dT * dT) >> T2ShiftCold);
+    OFF2 = Off2MultCold * ((int64_t)(temp_calc - 2000) * (temp_calc - 2000)) / ((int64_t)1 << Off2ShiftCold);
+    SENS2 = Sens2MultCold * ((int64_t)(temp_calc - 2000) * (temp_calc - 2000)) / ((int64_t)1 << Sens2ShiftCold);
+    
+    if(temp_calc < -1500)
+    // If temp_calc is below -15.0C 
+    {
+      OFF2 = OFF2 + Off2MultVeryCold * ((temp_calc + 1500) * (temp_calc + 1500));
+      SENS2 = SENS2 + Sens2MultVeryCold * ((temp_calc + 1500) * (temp_calc + 1500));
+    }
+  }
+  else
+  // If temp_calc is above 20.0C
+  { 
+    T2 = T2MultHot * ((int64_t)dT * dT) / ((int64_t)1 << T2ShiftHot);
+    OFF2 = Off2MultHot * ((int64_t)(temp_calc - 2000) * (temp_calc - 2000)) / 16;
+    SENS2 = 0;
+    
+    if(temp_calc > 4500)
+    // If temp_calc is above 45.0C; Sens2MultVeryHot is one on the 01BA,
+    // whose flow chart alone carries this term, and zero on every other
+    // variant, where it subtracts nothing
+    {
+      SENS2 = SENS2 - Sens2MultVeryHot * ((int64_t)(temp_calc - 4500) * (temp_calc - 4500)) / 8;
+    }
+  }
+  
+  // Now bring it all together to apply offsets 
+  
+  OFF = ((int64_t)coefficient[2] << OffShift) + (((coefficient[4] * (int64_t)dT)) >> OffDtShift);
+  SENS = ((int64_t)coefficient[1] << SensShift) + (((coefficient[3] * (int64_t)dT)) >> SensDtShift);
+  
+  temp_calc = temp_calc - T2;
+  OFF = OFF - OFF2;
+  SENS = SENS - SENS2;
 
-	// Now lets calculate the pressure
-	
+  // Now lets calculate the pressure
+  
 
-	pressure_calc = (((SENS * pressure_raw) / 2097152 ) - OFF) / ((int64_t)1 << PShift);
-	
-	_temperature_actual = temp_calc ;
-	_pressure_actual = pressure_calc ; // 10;// pressure_calc;
-	
+  pressure_calc = (((SENS * pressure_raw) / 2097152 ) - OFF) / ((int64_t)1 << PShift);
+  
+  _temperature_actual = temp_calc ;
+  _pressure_actual = pressure_calc ; // 10;// pressure_calc;
+  
 
 }
 
@@ -869,7 +869,7 @@ uint32_t getADCconversionMS5803(uint8_t _measurement)
 
 uint8_t sendCommand(uint8_t Command)
 {
-	si.beginTransmission(PresADR);
+  si.beginTransmission(PresADR);
     si.write(Command);
     uint8_t Error = si.endTransmission();
     if(Error) ms5803Fail = true; //No acknowledge: chip 0 fault on this reading
