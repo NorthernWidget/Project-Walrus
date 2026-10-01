@@ -507,7 +507,7 @@ Acquisition acquireMS5803()
 Acquisition acquireMCP9808()
 {
   mcp9808Fail = false;
-  Temp0 = getTemp();
+  Temp0 = getTemp(); //DEBUG!
   SplitAndLoad(0x50, (unsigned int)(int16_t)(Temp0*100.0)); //Schema 1: temp ext, int16, 0.01°C (Block 2)
 
   Acquisition Result;
