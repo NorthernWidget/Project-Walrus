@@ -12,17 +12,17 @@
 // #include <SoftWire.h>
 // #include "SoftwareI2C.h"
 #include <SlowSoftWire.h>
-#include <MS5803.h>
+#include <MS5803_Compensation.h>
+#include <MS5803_Protocol.h>   //the part's commands and addresses, defined once
 #include <Wire.h>
 #include <EEPROM.h>
 // #include <EEPROM.h> //DEBUG!
 //Commands
 
-#define CMD_RESET 0x1E // reset command
-#define CMD_ADC_READ 0x00 // ADC read command
-#define CMD_ADC_CONV 0x40 // ADC conversion command
+//The part's commands and addresses come from MS5803_Protocol.h. They used to be
+//defined here as well, with the same values and no guard: change one and the
+//other goes stale.
 
-#define CMD_PROM 0xA0 // Coefficient location
 
 //What one acquisition has to say for itself. A fault means the chip's data are
 //not to be trusted, and the chip's Status bit is set; a notice reports
@@ -43,14 +43,15 @@ struct Chip
   Acquisition (*Acquire)(void);
 };
 
-//The part that is fitted, and the datasheet's compensation for it, both from
-//the MS5803 library: this firmware used to carry a second copy of the constant
-//table and of every line of the arithmetic, and NW-Tests' compensation_check.py
-//existed to hold the two in agreement. The bus stays here, because reaching the
-//part over SlowSoftWire with the fault folded into StatusReg is this board's
-//own validated path; only setModel(), setCoefficients() and compensate() are
-//the library's.
-MS5803 ms5803;
+//The part that is fitted, and the datasheet's compensation for it, from the
+//MS5803 library. This firmware used to carry a second copy of the constant
+//table and of every line of the arithmetic, and compensation_check.py existed
+//to hold the two in agreement.
+//MS5803_Compensation is the half of that library with no bus in it, which is
+//exactly this board's half: reaching the part over SlowSoftWire with a flat
+//delay and the fault folded into StatusReg is the Walrus's own validated path,
+//and the library's own reading code is not wanted here.
+MS5803_Compensation ms5803;
 
 #define CTRL 0x46  //Define location of onboard control/confiuration register (Schema 1 Page 2 Config byte; was 0x00, which is now the Page 0 schema byte)
 
@@ -93,7 +94,7 @@ MS5803 ms5803;
                                    //data; setting the status bit would tell a controller to discard
                                    //exactly what is worth keeping
 
-const uint8_t PresADR = 0x77;
+const uint8_t PresADR = ADDRESS_LOW;   //the MS5803's address, from MS5803_Protocol.h
 // const uint8_t TempADR = 0x18; 
 const uint8_t TempADR = 0x18; 
 
@@ -306,8 +307,8 @@ Acquisition acquireMS5803()
 {
   ms5803Fail = false;
   getMeasurements();
-  SplitAndLoad(0x58, long(ms5803.getPressureADC()));      //Schema 1: D1, uint32, ADC counts (Block 3)
-  SplitAndLoad(0x5C, long(ms5803.getTemperatureADC()));   //Schema 1: D2, uint32, ADC counts (Block 3)
+  SplitAndLoad(0x58, long(ms5803.pressureADC()));         //Schema 1: D1, uint32, ADC counts (Block 3)
+  SplitAndLoad(0x5C, long(ms5803.temperatureADC()));      //Schema 1: D2, uint32, ADC counts (Block 3)
   if(ms5803.modelKnown())
   {
     Pressure = ms5803.pressureActual() / ms5803.mbarDivisor();
