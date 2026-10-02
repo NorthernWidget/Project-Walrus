@@ -12,6 +12,7 @@
 // #include <SoftWire.h>
 // #include "SoftwareI2C.h"
 #include <SlowSoftWire.h>
+#include <MS5803.h>
 #include <Wire.h>
 #include <EEPROM.h>
 // #include <EEPROM.h> //DEBUG!
@@ -42,172 +43,14 @@ struct Chip
   Acquisition (*Acquire)(void);
 };
 
-//The calibration constants for the part that is fitted. Every variant is
-//converted by the same equations in getMeasurements(); only these numbers
-//differ, and setMS5803Model() gives them their values. Each is read from that
-//variant's "PRESSURE AND TEMPERATURE CALCULATION" and "SECOND ORDER TEMPERATURE
-//COMPENSATION" pages.
-uint8_t OffShift;           //OFF  = C2 << OffShift + (C4 * dT) >> OffDtShift
-uint8_t OffDtShift;
-uint8_t SensShift;          //SENS = C1 << SensShift + (C3 * dT) >> SensDtShift
-uint8_t SensDtShift;
-uint8_t MbarDivisor;        //the converted value divided by this is mbar
-uint8_t T2MultCold;         //below 20 C
-uint8_t T2ShiftCold;
-uint8_t Off2MultCold;
-uint8_t Off2ShiftCold;
-uint8_t Sens2MultCold;
-uint8_t Sens2ShiftCold;
-uint8_t Off2MultVeryCold;   //below -15 C
-uint8_t Sens2MultVeryCold;
-uint8_t T2MultHot;          //20 C and above
-uint8_t T2ShiftHot;
-uint8_t Off2MultHot;
-uint8_t Sens2MultVeryHot;   //above 45 C, the 01BA alone
-uint8_t PShift;             //P = (D1 * SENS / 2^21 - OFF) / 2^PShift
-bool ModelKnown;            //false when setMS5803Model() was given no such part
-
-void setMS5803Model(uint8_t bar)
-// The calibration constants for the part that is fitted, from the bar figure in
-// its order code. A wrong number here gives a confidently wrong pressure and
-// raises no fault, so MS5803/extras/test/compensation_check.py compares every
-// one of them with the datasheets. Run it after any edit.
-{
-  ModelKnown = true;
-
-  switch(bar)
-  {
-    case (1):   //MS5803-01BA
-      OffShift = 16;
-      OffDtShift = 7;
-      SensShift = 15;
-      SensDtShift = 8;
-      MbarDivisor = 100;
-      T2MultCold = 1;
-      T2ShiftCold = 31;
-      Off2MultCold = 3;
-      Off2ShiftCold = 0;
-      Sens2MultCold = 7;
-      Sens2ShiftCold = 3;
-      Off2MultVeryCold = 0;
-      Sens2MultVeryCold = 2;
-      T2MultHot = 0;
-      T2ShiftHot = 0;
-      Off2MultHot = 0;
-      PShift = 15;
-      Sens2MultVeryHot = 1;
-      break;
-
-    case (2):   //MS5803-02BA
-      OffShift = 17;
-      OffDtShift = 6;
-      SensShift = 16;
-      SensDtShift = 7;
-      MbarDivisor = 100;
-      T2MultCold = 1;
-      T2ShiftCold = 31;
-      Off2MultCold = 61;
-      Off2ShiftCold = 4;
-      Sens2MultCold = 2;
-      Sens2ShiftCold = 0;
-      Off2MultVeryCold = 20;
-      Sens2MultVeryCold = 12;
-      T2MultHot = 0;
-      T2ShiftHot = 0;
-      Off2MultHot = 0;
-      PShift = 15;
-      Sens2MultVeryHot = 0;
-      break;
-
-    case (5):   //MS5803-05BA
-      OffShift = 18;
-      OffDtShift = 5;
-      SensShift = 17;
-      SensDtShift = 7;
-      MbarDivisor = 100;
-      T2MultCold = 3;
-      T2ShiftCold = 33;
-      Off2MultCold = 3;
-      Off2ShiftCold = 3;
-      Sens2MultCold = 7;
-      Sens2ShiftCold = 3;
-      Off2MultVeryCold = 0;
-      Sens2MultVeryCold = 3;
-      T2MultHot = 0;
-      T2ShiftHot = 0;
-      Off2MultHot = 0;
-      PShift = 15;
-      Sens2MultVeryHot = 0;
-      break;
-
-    case (7):   //MS5803-07BA
-      OffShift = 18;
-      OffDtShift = 5;
-      SensShift = 17;
-      SensDtShift = 6;
-      MbarDivisor = 100;
-      T2MultCold = 3;
-      T2ShiftCold = 33;
-      Off2MultCold = 3;
-      Off2ShiftCold = 3;
-      Sens2MultCold = 7;
-      Sens2ShiftCold = 3;
-      Off2MultVeryCold = 0;
-      Sens2MultVeryCold = 3;
-      T2MultHot = 0;
-      T2ShiftHot = 0;
-      Off2MultHot = 0;
-      PShift = 15;
-      Sens2MultVeryHot = 0;
-      break;
-
-    case (14):   //MS5803-14BA
-      OffShift = 16;
-      OffDtShift = 7;
-      SensShift = 15;
-      SensDtShift = 8;
-      MbarDivisor = 10;
-      T2MultCold = 3;
-      T2ShiftCold = 33;
-      Off2MultCold = 3;
-      Off2ShiftCold = 1;
-      Sens2MultCold = 5;
-      Sens2ShiftCold = 3;
-      Off2MultVeryCold = 7;
-      Sens2MultVeryCold = 4;
-      T2MultHot = 7;
-      T2ShiftHot = 37;
-      Off2MultHot = 1;
-      PShift = 15;
-      Sens2MultVeryHot = 0;
-      break;
-
-    case (30):   //MS5803-30BA
-      OffShift = 16;
-      OffDtShift = 7;
-      SensShift = 15;
-      SensDtShift = 8;
-      MbarDivisor = 10;
-      T2MultCold = 3;
-      T2ShiftCold = 33;
-      Off2MultCold = 3;
-      Off2ShiftCold = 1;
-      Sens2MultCold = 5;
-      Sens2ShiftCold = 3;
-      Off2MultVeryCold = 7;
-      Sens2MultVeryCold = 4;
-      T2MultHot = 7;
-      T2ShiftHot = 37;
-      Off2MultHot = 1;
-      PShift = 13;
-      Sens2MultVeryHot = 0;
-      break;
-
-    default:   //no such part: there is nothing to convert with
-      ModelKnown = false;
-      break;
-  }
-}
+//The part that is fitted, and the datasheet's compensation for it, both from
+//the MS5803 library: this firmware used to carry a second copy of the constant
+//table and of every line of the arithmetic, and NW-Tests' compensation_check.py
+//existed to hold the two in agreement. The bus stays here, because reaching the
+//part over SlowSoftWire with the fault folded into StatusReg is this board's
+//own validated path; only setModel(), setCoefficients() and compensate() are
+//the library's.
+MS5803 ms5803;
 
 #define CTRL 0x46  //Define location of onboard control/confiuration register (Schema 1 Page 2 Config byte; was 0x00, which is now the Page 0 schema byte)
 
@@ -292,15 +135,10 @@ const uint8_t TempADR = 0x18;
 // #define FIRMWAREID 0x0001 //Base firmware ID
 
 
-uint16_t coefficient[8];// Coefficients;
 
-int32_t _temperature_actual;
-int32_t _pressure_actual;
 //The ADC conversions the compensation is computed from: D1 and D2 in the
 //MS5803's own units. Served whole so a reading can be checked afterwards, and
 //so that a controller which knows the variant can compensate for itself.
-uint32_t _pressure_adc;
-uint32_t _temperature_adc;
 
 float Pressure = 0; // MS5803 pressure
 float Temp0 = 0; // Global tempurature from thermistor
@@ -423,7 +261,7 @@ void setup() {
   // if(!digitalRead(ADR_SEL_PIN)) ADR = ADR_Alt; //If solder jumper is bridged, use alternate address //DEBUG!
 
   loadPage0();
-  setMS5803Model(Reg[PAGE1_MS5803_MODEL]);   //which MS5803 is fitted, as provisioned
+  ms5803.setModel(Reg[PAGE1_MS5803_MODEL]);  //which MS5803 is fitted, as provisioned
   if(Reg[REG_I2C_ADDR] != 0xFF) ADR = Reg[REG_I2C_ADDR]; //Provisioned address; 0xFF = use default
   Reg[REG_REPORT] = page0Valid ? NOTICE_UNIT_RESET : NOTICE_UNIT_PAGE0; //Latched until the controller writes Control
   Wire.begin(ADR);  //Begin slave I2C
@@ -468,14 +306,14 @@ Acquisition acquireMS5803()
 {
   ms5803Fail = false;
   getMeasurements();
-  SplitAndLoad(0x58, long(_pressure_adc));                //Schema 1: D1, uint32, ADC counts (Block 3)
-  SplitAndLoad(0x5C, long(_temperature_adc));             //Schema 1: D2, uint32, ADC counts (Block 3)
-  if(ModelKnown)
+  SplitAndLoad(0x58, long(ms5803.getPressureADC()));      //Schema 1: D1, uint32, ADC counts (Block 3)
+  SplitAndLoad(0x5C, long(ms5803.getTemperatureADC()));   //Schema 1: D2, uint32, ADC counts (Block 3)
+  if(ms5803.modelKnown())
   {
-    Pressure = _pressure_actual / MbarDivisor;
-    Temp1 = _temperature_actual / 100.0;
+    Pressure = ms5803.pressureActual() / ms5803.mbarDivisor();
+    Temp1 = ms5803.temperatureActual() / 100.0;
     SplitAndLoad(0x48, long(Pressure*1000.0));              //Schema 1: pressure, int32, µBar (Block 1)
-    SplitAndLoad(0x4C, (unsigned int)(int16_t)_temperature_actual); //Schema 1: temp MS5803, int16, 0.01°C (Block 1)
+    SplitAndLoad(0x4C, (unsigned int)(int16_t)ms5803.temperatureActual()); //Schema 1: temp MS5803, int16, 0.01°C (Block 1)
   }
   else
   {
@@ -497,7 +335,7 @@ Acquisition acquireMS5803()
     Result.Report = FAULT_MS5803_NOACK;
     Result.Fault = true;
   }
-  else if(!ModelKnown)
+  else if(!ms5803.modelKnown())
   {
     Result.Report = NOTICE_MS5803_NOMODEL; //A notice: the raw conversions above still stand
   }
@@ -803,10 +641,10 @@ uint8_t getValues()
 {
     // Update global values from sensors
     getMeasurements();
-    Pressure = _pressure_actual / MbarDivisor;
+    Pressure = ms5803.pressureActual() / ms5803.mbarDivisor();
     Temp0 = getTemp(); //DEBUG!
     // Temp0 = 26.25; //DEBUG!
-    Temp1 = _temperature_actual / 100.0;
+    Temp1 = ms5803.temperatureActual() / 100.0;
     return StatusReg; // FIX to give status indication!
 }
 
@@ -831,6 +669,7 @@ void initMS5803()
   delay(3); //Reset system 
    uint8_t i;
    uint8_t Data[2] = {0};
+   uint16_t coefficient[8];   //read once and handed to the library, not kept
 
    for(i = 0; i <= 7; i++){
        sendCommand(CMD_PROM + (i * 2));
@@ -839,87 +678,19 @@ void initMS5803()
        Data[1] = si.read();
        coefficient[i] = (Data[0] << 8)|Data[1];
    }
+   ms5803.setCoefficients(coefficient);  //the library compensates with what this bus read
    //Bits 2~3 show the status of the MS5803
    StatusReg = StatusReg | (sendCommand(CMD_RESET) << 2);
    delay(3);
 }
 
 void getMeasurements()
-// Gets resuts from ADC and stores them into internal variables
+// Read the two conversions off the part over this board's own bus, then let
+// the library compensate them: the arithmetic and the constant table are its.
 {
-  //Retrieve ADC result
-  // int32_t temperature_raw = getADCconversionMS5803(TEMPERATURE, _precision);
-  // int32_t pressure_raw = getADCconversionMS5803(PRESSURE, _precision);
-
   int32_t temperature_raw = getADCconversionMS5803(0x10);
   int32_t pressure_raw = getADCconversionMS5803(0x00);
-  _pressure_adc = (uint32_t)pressure_raw;
-  _temperature_adc = (uint32_t)temperature_raw;
-  
-  
-  //Create Variables for calculations
-  int32_t temp_calc;
-  int32_t pressure_calc;
-  
-  int32_t dT;
-    
-  //Now that we have a raw temperature, let's compute our actual.
-  dT = temperature_raw - ((int32_t)coefficient[5] << 8);
-  temp_calc = (((int64_t)dT * coefficient[6]) >> 23) + 2000;
-  
-  // TODO TESTING  _temperature_actual = temp_calc;
-  
-  //Now we have our first order Temperature, let's calculate the second order.
-  int64_t T2, OFF2, SENS2, OFF, SENS; //working variables
-
-  if (temp_calc < 2000) 
-  // If temp_calc is below 20.0C
-  {  
-    T2 = T2MultCold * (((int64_t)dT * dT) >> T2ShiftCold);
-    OFF2 = Off2MultCold * ((int64_t)(temp_calc - 2000) * (temp_calc - 2000)) / ((int64_t)1 << Off2ShiftCold);
-    SENS2 = Sens2MultCold * ((int64_t)(temp_calc - 2000) * (temp_calc - 2000)) / ((int64_t)1 << Sens2ShiftCold);
-    
-    if(temp_calc < -1500)
-    // If temp_calc is below -15.0C 
-    {
-      OFF2 = OFF2 + Off2MultVeryCold * ((temp_calc + 1500) * (temp_calc + 1500));
-      SENS2 = SENS2 + Sens2MultVeryCold * ((temp_calc + 1500) * (temp_calc + 1500));
-    }
-  }
-  else
-  // If temp_calc is above 20.0C
-  { 
-    T2 = T2MultHot * ((int64_t)dT * dT) / ((int64_t)1 << T2ShiftHot);
-    OFF2 = Off2MultHot * ((int64_t)(temp_calc - 2000) * (temp_calc - 2000)) / 16;
-    SENS2 = 0;
-    
-    if(temp_calc > 4500)
-    // If temp_calc is above 45.0C; Sens2MultVeryHot is one on the 01BA,
-    // whose flow chart alone carries this term, and zero on every other
-    // variant, where it subtracts nothing
-    {
-      SENS2 = SENS2 - Sens2MultVeryHot * ((int64_t)(temp_calc - 4500) * (temp_calc - 4500)) / 8;
-    }
-  }
-  
-  // Now bring it all together to apply offsets 
-  
-  OFF = ((int64_t)coefficient[2] << OffShift) + (((coefficient[4] * (int64_t)dT)) >> OffDtShift);
-  SENS = ((int64_t)coefficient[1] << SensShift) + (((coefficient[3] * (int64_t)dT)) >> SensDtShift);
-  
-  temp_calc = temp_calc - T2;
-  OFF = OFF - OFF2;
-  SENS = SENS - SENS2;
-
-  // Now lets calculate the pressure
-  
-
-  pressure_calc = (((SENS * pressure_raw) / 2097152 ) - OFF) / ((int64_t)1 << PShift);
-  
-  _temperature_actual = temp_calc ;
-  _pressure_actual = pressure_calc ; // 10;// pressure_calc;
-  
-
+  ms5803.compensate((uint32_t)pressure_raw, (uint32_t)temperature_raw);
 }
 
 uint32_t getADCconversionMS5803(uint8_t _measurement)
