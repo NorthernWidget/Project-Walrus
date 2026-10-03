@@ -12,15 +12,14 @@
 // #include <SoftWire.h>
 // #include "SoftwareI2C.h"
 #include <SlowSoftWire.h>
-#include <MS5803_Compensation.h>
-#include <MS5803_Protocol.h>   //the part's commands and addresses, defined once
+#include <MS5803.h>   //MS5803_Compensation is the half with no bus in it, which is this board's half
 #include <Wire.h>
 #include <EEPROM.h>
 // #include <EEPROM.h> //DEBUG!
 //Commands
 
-//The part's commands and addresses come from MS5803_Protocol.h. They used to be
-//defined here as well, with the same values and no guard: change one and the
+//The part's commands and addresses come from the MS5803 library. They used to
+//be defined here as well, with the same values and no guard: change one and the
 //other goes stale.
 
 
@@ -94,7 +93,7 @@ MS5803_Compensation ms5803;
                                    //data; setting the status bit would tell a controller to discard
                                    //exactly what is worth keeping
 
-const uint8_t PresADR = ADDRESS_LOW;   //the MS5803's address, from MS5803_Protocol.h
+const uint8_t PresADR = ADDRESS_LOW;   //the MS5803's address, from MS5803.h
 // const uint8_t TempADR = 0x18; 
 const uint8_t TempADR = 0x18; 
 
